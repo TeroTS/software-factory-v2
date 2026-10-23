@@ -11,8 +11,12 @@ dev = [
     "ruff>=0.17.2",
 ]
 
-[tool.uv]
-package = false
+[build-system]
+requires = ["hatchling==1.27.0"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/software_factory"]
 
 [tool.ruff]
 target-version = "py314"
@@ -24,6 +28,10 @@ select = ["E", "F", "I", "UP", "B"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra"
+markers = [
+    "docker: real Docker Compose integration (FACTORY_DOCKER_TESTS=1)",
+    "e2e: writes to GitHub and uses Copilot (explicit operator inputs required)",
+]
 
 [tool.coverage.run]
 source = ["src"]

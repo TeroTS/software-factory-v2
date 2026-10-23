@@ -1,131 +1,111 @@
 # Service Architecture: Autonomous Coding Factory
 
-Scope: component-level (≈C4 L2) view plus the primary issue-to-draft-PR workflow (US-01 + US-02).
+Component-level architecture and the primary US-01 workflow. The operator runs
+one local factory against one trusted target repository; GitHub holds durable
+coordination state. There is no HTTP server, message broker, or database.
 
 ## Evidence status
 
-**No factory implementation exists.** `src/` contains only `.gitkeep`
-([README.md L4, L36](../../README.md#L4)). Every runtime component below is **specified**
-(accepted design in [SPEC.md](../../SPEC.md), [DECISIONS.md](../../DECISIONS.md),
-[docs/contracts.md](../contracts.md)), not verified in code.
-
-| Label | Meaning |
-| --- | --- |
-| **[S]** Specified | Stated in accepted spec/decisions/contracts; no code yet. |
-| **[P]** Probed | Feasibility probe result recorded in `DECISIONS.md`; raw evidence not in repo. |
-| **[V]** Verified in repo | Backed by committed, executable files. |
-| **[I]** Inferred | Not stated explicitly; derived by this document. |
+- **Implemented:** backed by source, not necessarily proven against live services end to end.
+- **Integration-tested:** real Git/process/Docker tests and a real Pi/Copilot coding probe passed locally.
+- **Specified only:** US-02 repair recovery and US-03's successful manual-requeue acceptance flow.
+- **Not accepted end to end:** the live issue-to-linked-draft-PR test has not passed;
+  see [current slice](../slices/current-slice.md) and [live test](../../tests/test_e2e.py#L14).
 
 ## Architecture diagram
+
+All solid connections describe implemented orchestration. Target CI/human review
+is external, specified follow-on behavior, not executed by the factory.
 
 ```mermaid
 flowchart LR
     OP(["Operator"])
-    HR(["Human reviewer"])
-
-    subgraph HOST["Operator host (local, no inbound endpoint)"]
-        CFG[/"factory.toml<br/>repository, compose_file,<br/>compose_service, model"/]
-        RUN["Local runner<br/>Python 3.14, terminal process<br/>poll 30s, 1 run, 900s deadline,<br/>≤3 repairs"]
-        GH_CLI["GitHub CLI + git<br/>(host credentials)"]
-        PIAUTH["Host Pi auth<br/>print-bearer-token"]
-        WS[("Per-run workspace<br/>fresh clone of default branch")]
-        ART[("artifacts/<br/>failed workspaces + logs")]
+    REVIEW(["Human reviewer"])
+    subgraph HOST["Operator host: local factory, no inbound endpoint"]
+        CONFIG[/"Trusted TOML + Compose configuration"/]
+        RUN["Local runner<br/>Python 3.14 terminal process<br/>30s polling, one issue run, 900s budget"]
+        GH["Host GitHub CLI<br/>REST API over HTTPS<br/>host-only GitHub credentials"]
+        GIT["Host Git<br/>trusted metadata outside workspace"]
+        AUTH["Host Pi authentication<br/>Copilot-only bearer, lifetime at least 20m"]
+        WS[("Fresh per-run workspace<br/>default-branch repository contents")]
+        LOG[("Private local artifacts<br/>failed workspace and run.log")]
     end
-
-    subgraph SBX["Per-run Docker Compose sandbox (operator-prepared)"]
-        AGENT["compose_service 'agent'<br/>Pi one-shot, nonpersistent<br/>+ repo toolchain"]
-        SCRIPTS["./scripts/setup<br/>./scripts/verify"]
-        DEPS[("Dependency services<br/>(DBs etc., optional)")]
+    subgraph SANDBOX["Unique per-run Docker Compose project"]
+        AGENT["Prepared agent service<br/>Node + Pi + repository toolchain<br/>temporary Pi configuration"]
+        CHECK["Repository scripts<br/>setup and verify"]
+        DEP["Optional local dependency services"]
     end
+    REMOTE[("GitHub.com target repository<br/>issues, labels, comments, branches, draft PRs")]
+    COP["GitHub Copilot API<br/>validated HTTPS endpoint"]
+    CI["Target repository CI"]
 
-    subgraph GITHUB["GitHub.com: target repo TeroTS/factory-smoke-test"]
-        ISS["Issues, label agent:implement,<br/>status comments"]
-        BR["Branch factory/issue-N"]
-        PR["Draft PR<br/>Closes #N"]
-        CI["Target repo CI"]
-    end
-
-    COP["GitHub Copilot API<br/>api.business.githubcopilot.com"]
-
-    OP -- "0. start runner with config" --> RUN
-    CFG -. "0. validated at startup" .-> RUN
-    OP -- "applies label / requeues" --> ISS
-    RUN -- "uses" --> GH_CLI
-    GH_CLI -- "1. poll labeled issues (30s)" --> ISS
-    GH_CLI -- "2. duplicate check: open PR / remote branch" --> PR
-    GH_CLI -- "2. duplicate check" --> BR
-    GH_CLI -- "3. remove label, running comment, snapshot title/body" --> ISS
-    GH_CLI -- "4. clone default branch" --> WS
-    RUN -- "5. resolve Copilot-only bearer" --> PIAUTH
-    RUN -- "5. compose up; bearer via stdin;<br/>mount workspace only" --> AGENT
-    WS <-. "bind mount (only host dir)" .-> AGENT
-    AGENT -- "6. run setup / 8. run verify" --> SCRIPTS
-    SCRIPTS --> DEPS
-    AGENT -- "7. implement / 8. repair (HTTPS)" --> COP
-    RUN -- "9. diff check, commit, push no-force" --> GH_CLI
-    GH_CLI -- "9. push" --> BR
-    GH_CLI -- "9. create draft PR" --> PR
-    GH_CLI -- "10. success link / failure summary" --> ISS
-    RUN -- "10. retain on failure" --> ART
-    RUN -- "11. compose down / remove containers" --> SBX
-    BR --> CI
-    PR -- "12. review, merge decision" --> HR
-    CI --> HR
+    OP -->|"1. start terminal runner"| RUN
+    CONFIG -->|"1. validate and freeze"| RUN
+    OP -->|"2. apply agent:implement"| REMOTE
+    RUN -->|"2-3, 9-10. invoke gh"| GH
+    GH <-->|"2-3. poll, duplicate checks, claim, snapshot"| REMOTE
+    RUN -->|"4, 9. invoke git"| GIT
+    REMOTE -->|"4. fetch default branch over HTTPS"| GIT
+    GIT -->|"4. checkout with separate metadata"| WS
+    RUN -->|"5. resolve privately"| AUTH
+    RUN -->|"5. start project; bearer and task via stdin"| AGENT
+    WS <-->|"workspace-only bind mount at /workspace"| AGENT
+    AGENT -->|"6. setup; 8. verify"| CHECK
+    CHECK -->|"dependency-backed checks over local network"| DEP
+    AGENT <-->|"7. implementation request and model responses"| COP
+    RUN -->|"8. stop and remove containers before publication"| SANDBOX
+    GIT -->|"9. non-force push factory/issue-N"| REMOTE
+    GH -->|"9. draft PR; 10. outcome comment"| REMOTE
+    RUN -->|"10. retain diagnostics on failure"| LOG
+    REMOTE -.->|"11. independent checks"| CI
+    REMOTE -.->|"11. review and merge decision"| REVIEW
+    CI -.->|"11. results"| REVIEW
 ```
 
-Not shown: US-03 manual requeue reuses steps 1–12 after the operator reapplies the label.
+## Components and interaction evidence
 
-## Components
+| Component / boundary | Responsibility and interface | Supporting evidence |
+| --- | --- | --- |
+| Operator configuration → runner | Required repository, Compose file/service, exact Copilot model; relative paths resolved at startup | [config.py L20](../../src/software_factory/config.py#L20), [contracts: configuration](../contracts.md#contract-1-local-runner-invocation-and-repository-configuration) |
+| Terminal runner | Serial polling and issue-run orchestration; SIGTERM/Ctrl-C cleanup | [runner.py L53](../../src/software_factory/runner.py#L53), [entrypoint L14](../../src/software_factory/__main__.py#L14) |
+| Runner → GitHub CLI → GitHub REST API | Paginated issue discovery, exact PR/ref checks, label removal, snapshots, comments and draft PR creation; payloads via stdin | [github.py L17](../../src/software_factory/github.py#L17), [github.py L50](../../src/software_factory/github.py#L50) |
+| Runner → host Git → workspace/remote | Fresh fetch/checkout; host-owned metadata, hooks/config isolation; commit nonempty changes and push without force | [repository.py L11](../../src/software_factory/repository.py#L11), [repository.py L58](../../src/software_factory/repository.py#L58) |
+| Runner → host Pi auth → sandbox | Copilot bearer resolution without printing credentials; private stdin payload; known endpoint/lifetime checks | [runner.py L95](../../src/software_factory/runner.py#L95), [sandbox.py L100](../../src/software_factory/sandbox.py#L100) |
+| Runner → Docker Compose | Frozen operator configuration; unique project; all services validated; lifecycle controlled outside the workspace | [preflight L20](../../src/software_factory/runner.py#L20), [sandbox validation L53](../../src/software_factory/sandbox.py#L53), [lifecycle L111](../../src/software_factory/sandbox.py#L111) |
+| Workspace ↔ agent | Only `/workspace` bind mount; Git metadata stays outside it; no host Docker socket or GitHub credentials | [sandbox.py L61](../../src/software_factory/sandbox.py#L61), [repository.py L11](../../src/software_factory/repository.py#L11) |
+| Pi ↔ Copilot API | One-shot print mode with exact model, coding tools, ephemeral auth/config; discovered resources/session persistence disabled | [sandbox_agent.mjs](../../src/software_factory/sandbox_agent.mjs), [wrapper tests](../../tests/test_agent_wrapper.py) |
+| Repository scripts → local dependency services | Exit status is the verification protocol; prepared private bridge networks and anonymous volumes, no host ports/shared resources | [sandbox.py L137](../../src/software_factory/sandbox.py#L137), [real dependency test](../../tests/test_docker_integration.py#L100) |
+| Private diagnostic store | Mode-0700 run directories, mode-0600 redacted command logs; failure retention, no resumption | [runner.py L68](../../src/software_factory/runner.py#L68), [process.py L23](../../src/software_factory/process.py#L23), [.gitignore](../../.gitignore) |
+| Independent target CI / reviewer | External follow-on checks; reviewer owns merge; factory does not revise PRs from feedback | [SPEC.md L57](../../SPEC.md#L57) |
+| Factory development CI | Separate from target CI: formatting, lint, real Docker tests, Python and Node Pi-bridge coverage gates ≥80% | [verify workflow](../../.github/workflows/verify.yml), [Makefile](../../Makefile) |
 
-| Component | Responsibility | Status | Evidence |
-| --- | --- | --- | --- |
-| Operator | Prepares target repo + Compose, authenticates, runs factory, labels, requeues, cleans up | [S] | [DECISIONS.md L19, L99](../../DECISIONS.md#L19), [CONTEXT.md L9-11](../../CONTEXT.md#L9) |
-| `factory.toml` | Four required fields; no credentials or command templates | [S] | [contracts.md L20-61](../contracts.md#L20) |
-| Local runner | Polls, claims, orchestrates sandbox/Pi/verify, enforces deadline and repair count, publishes | [S] | [DECISIONS.md L20, L66, L133](../../DECISIONS.md#L133), [contracts.md L28-30](../contracts.md#L28) |
-| GitHub CLI + git (host) | All GitHub reads/writes; credentials never enter sandbox | [S] | [DECISIONS.md L69, L80](../../DECISIONS.md#L69), [contracts.md L221-224](../contracts.md#L221) |
-| Host Pi auth | Resolves Copilot-only bearer (`--min-expiry 20m`) | [S][P] | [contracts.md L128-135](../contracts.md#L128), [DECISIONS.md L140-141](../../DECISIONS.md#L140) |
-| Per-run workspace | Fresh default-branch checkout; only host dir exposed | [S] | [SPEC.md L46, L49](../../SPEC.md#L46) |
-| Compose sandbox / agent service | Runs Pi, setup, verify, generated commands; internet allowed; no Docker socket | [S][P] | [contracts.md L105-156](../contracts.md#L105), [DECISIONS.md L142, L145](../../DECISIONS.md#L142) |
-| `./scripts/setup`, `./scripts/verify` | Target-repo golden-path contract; exit 0 = success | [S] | [contracts.md L158-197](../contracts.md#L158) |
-| Dependency services | Optional DBs/services in Compose | [S] | [SPEC.md L48](../../SPEC.md#L48); smoke target has none ([DECISIONS.md L146](../../DECISIONS.md#L146)) |
-| GitHub (issues, branches, PRs) | Durable coordination; no database | [S] | [DECISIONS.md L23, L58, L112](../../DECISIONS.md#L58) |
-| Copilot API | LLM provider; no fallback provider | [S][P] | [DECISIONS.md L68, L81, L141](../../DECISIONS.md#L141) |
-| `artifacts/` | Local failed-run retention, git-ignored | [S][V] ignore rule | [README.md L64-65](../../README.md#L64), [contracts.md L259-262](../contracts.md#L259) |
-| Factory CI | Repo's own verify workflow (dev toolchain only) | [V] | [.github/workflows/verify.yml](../../.github/workflows/verify.yml), [Makefile L21-24](../../Makefile#L21) |
+## Numbered workflow
 
-## Workflow walkthrough
+1. **Start and validate.** Load the four-field TOML, check host tools/GitHub authentication/Docker, resolve Compose with a restricted environment, and freeze supported isolation settings. Invalid startup inputs fail before a claim. [entrypoint](../../src/software_factory/__main__.py#L19), [preflight](../../src/software_factory/runner.py#L20)
+2. **Discover.** Operator applies `agent:implement`; each serial poll discovers all matching open issues, excluding PRs. Polling sleeps 30 seconds between completed batches. [runner](../../src/software_factory/runner.py#L53), [discovery](../../src/software_factory/github.py#L50)
+3. **Skip or claim.** Check exact head repository/`factory/issue-N` PR identity and remote branch. Existing PR → remove label, link PR, skip; branch without PR → remove label, request operator cleanup, skip. Otherwise confirm label removal, post running status, and snapshot only title/body. [coordination](../../src/software_factory/runner.py#L68), [GitHub boundaries](../../src/software_factory/github.py#L63)
+4. **Create workspace.** Fetch the discovered default branch into trusted host Git metadata, check out fresh contents into the exposed workspace, and record the base commit. The 900-second budget already covers duplicate/claim/workspace operations. [repository](../../src/software_factory/repository.py#L58), [budget](../../src/software_factory/runner.py#L70)
+5. **Authenticate and start sandbox.** Resolve a Copilot-only bearer with at least 20 minutes remaining; validate its endpoint metadata. Start a unique Compose project. Credentials and the immutable task snapshot reach the Node/Pi bridge through stdin, not host mounts or command arguments. [runner](../../src/software_factory/runner.py#L95), [sandbox](../../src/software_factory/sandbox.py#L100)
+6. **Set up.** Inside the sandbox, require both executable scripts and run `./scripts/setup`. Missing entrypoints or setup failure blocks implementation. [setup boundary](../../src/software_factory/sandbox.py#L137), [Docker failure tests](../../tests/test_docker_integration.py#L114)
+7. **Implement.** Pi receives the snapshot and repository contents with coding tools enabled, no clarification stage, no issue-thread/link retrieval, no inherited host Pi resources, and no provider fallback. Temporary configuration is removed after invocation. [Pi bridge](../../src/software_factory/sandbox_agent.mjs), [real Copilot probe](../../tests/test_docker_integration.py#L132)
+8. **Verify and freeze.** Execute `./scripts/verify` once. Failure ends US-01; repairs remain deferred. On success, stop/remove all project containers before reading workspace changes for publication. Timeout/interruption also attempts cleanup. [runner](../../src/software_factory/runner.py#L118), [deadline handling](../../src/software_factory/process.py#L23), [real cleanup test](../../tests/test_docker_integration.py#L178)
+9. **Publish.** Require a nonempty staged diff, commit with trusted host metadata, recheck branch absence, push once without force, and create a draft PR containing `Closes #N`. No changes or publication errors are failures. Uncertain remote writes are observed, never blindly repeated. [host publication](../../src/software_factory/repository.py#L65), [PR contract implementation](../../src/software_factory/github.py#L120), [orchestration](../../src/software_factory/runner.py#L125)
+10. **Report.** Post the actual PR URL on success and delete the successful run directory. On failure, post a concise reason when claimed, retain private workspace/logs, and report reporting/cleanup errors locally. The runner never adds back the trigger or resumes diagnostics. [outcome handling](../../src/software_factory/runner.py#L129), [failure tests](../../tests/test_runner.py)
+11. **Review externally.** Target CI and the human reviewer assess the published draft PR. These are specified external responsibilities, not factory-controlled steps. [SPEC.md L57](../../SPEC.md#L57)
 
-0. **Start** — Operator runs `uv run --frozen python -m software_factory --config factory.toml`. Config validated before any claim; invalid config → nonzero exit. [S] [contracts.md L28-61](../contracts.md#L28)
-1. **Poll** — Every 30 s, list `agent:implement` issues in the one target repo via host `gh`. One issue run at a time. [S] [SPEC.md L10, L43](../../SPEC.md#L10), [contracts.md L69-70](../contracts.md#L69)
-2. **Duplicate check** — Open PR with exact head `factory/issue-<N>` → remove label, comment link, skip. Remote branch without PR → remove label, request deletion, skip. [S] [SPEC.md L44-45](../../SPEC.md#L44), [contracts.md L86-96](../contracts.md#L86)
-3. **Claim + snapshot** — Remove label (confirmed), post running comment, snapshot title/body and base commit. 900 s deadline starts. [S] [SPEC.md L46](../../SPEC.md#L46), [contracts.md L73-79, L180-182](../contracts.md#L73)
-4. **Workspace** — Fresh isolated workspace from the default branch (discovered from GitHub). [S] [contracts.md L49, L91-92](../contracts.md#L91). Clone mechanism (`gh`/`git`) is [I].
-5. **Sandbox start** — Host resolves Copilot bearer, starts Compose service, passes bearer via private channel (stdin per probe), mounts only the workspace. [S][P] [contracts.md L128-148](../contracts.md#L128), [DECISIONS.md L140](../../DECISIONS.md#L140)
-6. **Setup** — `./scripts/setup` inside sandbox; missing script or failure fails the run. [S] [SPEC.md L50-51](../../SPEC.md#L50), [contracts.md L193](../contracts.md#L193)
-7. **Implement** — Pi one-shot print mode, explicit `github-copilot` model, extensions/MCP/skills disabled, input = snapshot + repo. [S] [contracts.md L117-124](../contracts.md#L117), [SPEC.md L47](../../SPEC.md#L47)
-8. **Verify + repair loop** — `./scripts/verify`; on failure, verify output → Pi repair → verify, max 3 repairs, shared deadline. [S] [SPEC.md L77-82](../../SPEC.md#L77), [contracts.md L183-186](../contracts.md#L183)
-9. **Publish** — On pass with nonempty diff: host commit, non-force push to `factory/issue-<N>`, `gh` draft PR with `Closes #<N>`. Empty diff → `no changes produced` failure. [S] [SPEC.md L52-53](../../SPEC.md#L52), [contracts.md L199-229](../contracts.md#L199)
-10. **Report** — Issue comment: success with actual PR URL, or concise failure reason. Failed workspace/logs retained locally. [S] [contracts.md L240-262](../contracts.md#L240)
-11. **Cleanup** — Stop/remove run-owned containers on completion, expiry, or operator stop. No auto-resume. [S] [SPEC.md L56](../../SPEC.md#L56), [contracts.md L154-156](../contracts.md#L154)
-12. **Review** — Target CI and human reviewer evaluate the draft PR; factory never merges or revises. [S] [SPEC.md L57](../../SPEC.md#L57)
+## Assumptions and unresolved questions
 
-## Assumptions (made by this document)
+- **Operator-owned prerequisites:** only one runner operates on the repository; labels are not a distributed lock. Prepared images/configuration are trusted, contain no broader credentials, and provide the target's real dependency-backed checks. See [operator setup](../../README.md#operator-setup).
+- **Live acceptance blocked:** the inspected smoke target's default branch still contains only Markdown files. Its preparation branch must be merged by the operator, and a Pi-capable agent image/Compose environment supplied. No preparation merge or live GitHub write was performed during this implementation.
+- **Evidence limit:** the real Pi probe proves isolated coding/authentication, not a full GitHub issue-to-PR run or automatic credential renewal. The opt-in [end-to-end test](../../tests/test_e2e.py) remains unpassed. Earlier feasibility results in [DECISIONS.md L140-146](../../DECISIONS.md#L140) are recorded claims; their ignored raw artifacts are absent from this checkout.
+- **Deferred behavior:** [US-02](../../SPEC.md#us-02-recover-a-verification-failure-through-bounded-repairs) adds up to three repairs; [US-03](../../SPEC.md#us-03-manually-requeue-a-failed-or-interrupted-issue) proves successful manual requeue. Neither is claimed complete here.
+- **Implementation limits:** Compose uses a fail-closed supported subset; images are prebuilt, dependency volumes anonymous, all capabilities dropped, and nested Git metadata rejected. These are documented constraints, not inferred support for arbitrary Compose environments.
+- **Residual risks:** internet-enabled agent code can exfiltrate sandbox-accessible data; GitHub writes/label changes are not atomic; a hard host crash may leave containers/status/branches; command output is buffered in host memory. Human review and operator cleanup remain necessary.
+- **No runtime protocol inference:** GitHub uses explicit REST calls through `gh`, Git uses HTTPS remotes, and Copilot uses its validated HTTPS endpoint. Actual dependency protocols are target-specific; only the test HTTP dependency is evidenced, not a production database or queue.
 
-- [I] Host-side commit happens by reading the workspace from the host, since the sandbox has no write credentials ([contracts.md L221-224](../contracts.md#L221)). Exact mechanism not specified.
-- [I] Bind mount is the workspace-sharing mechanism; contracts only say "no host directories beyond the run workspace".
-- [I] Polling uses `gh` (CLI named for "issue access" in [DECISIONS.md L69](../../DECISIONS.md#L69)); API vs. `gh issue list` not specified.
-- [I] Deadline enforcement mechanism (process kill, `compose down`) not specified.
+## Changing the architecture safely
 
-## Gaps, ambiguities, inconsistencies
-
-1. **No implementation.** Runner, config parser, sandbox orchestration, and publication are design-only. Only the dev toolchain is verified ([tests/test_toolchain.py](../../tests/test_toolchain.py)).
-2. **Probe evidence not in repo.** `DECISIONS.md L145` cites `artifacts/feasibility/target-probe/`; it is git-ignored and absent from this checkout.
-3. **Entrypoint vs. packaging.** Contract invokes `python -m software_factory`, but `pyproject.toml` sets `[tool.uv] package = false` with coverage source `src/` ([pyproject.toml L14-15, L28-30](../../pyproject.toml#L14)); how the module becomes importable is unresolved.
-4. **Agent image lacks Pi.** Smoke target's verification image does not contain Pi ([contracts.md L280-282](../contracts.md#L280)); no agent Compose file exists in either repo.
-5. **Target not ready.** Prep is on `chore/smoke-test-environment` (`c6d5b76`), not merged to `main` ([DECISIONS.md L146](../../DECISIONS.md#L146)).
-6. **Credential lifetime.** Bearer requires ≥20 min validity for a 15 min run; automatic renewal untested ([SPEC.md L111](../../SPEC.md#L111)).
-7. **Copilot endpoint selection.** Must be derived from token metadata; individual endpoint returned 401 ([DECISIONS.md L141](../../DECISIONS.md#L141)). Derivation logic unspecified.
-8. **"Running status" wording.** SPEC/DECISIONS say "record running status"; contracts clarify it is a comment only, no status labels ([contracts.md L233-234](../contracts.md#L233)).
-9. **Deadline start point.** SPEC says run deadline includes setup/implementation; contracts add workspace creation and publication ([contracts.md L180-182](../contracts.md#L180)) — consistent but stricter.
-10. **Single-runner enforcement.** Only operator discipline; no lock ([DECISIONS.md L113](../../DECISIONS.md#L113)).
-11. **Unresolved questions:** sandbox isolation validation method for full resolved Compose config; host-safe git metadata handling (hooks/filters) approach; where local run logs live beyond `artifacts/`.
+Update [SPEC.md](../../SPEC.md) and [contracts](../contracts.md) before interface or
+policy changes. Add boundary/failure tests and real integration evidence, keep
+[this diagram](service-architecture.md) and the [operator guide](../../README.md)
+consistent, and do not mark the slice done on mocked or partial-probe evidence.

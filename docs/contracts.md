@@ -47,8 +47,8 @@ at most three repair attempts after the initial implementation.
   files/services, and unavailable configured tooling with an actionable diagnostic.
   The configuration contains no credentials or arbitrary command templates.
   The default branch is discovered from GitHub, not configured separately.
-  The invocation is a contract for future implementation; the module does not
-  exist in the bootstrap yet.
+  The module is implemented under `src/software_factory/`; US-01 remains active
+  until the live issue-to-PR acceptance test passes.
 - Ordering / Idempotency expectations: Validate configuration before claiming
   issues. The operator runs only one instance for the target repository; this
   interface does not provide distributed coordination or automatic resumption.
@@ -271,8 +271,9 @@ at most three repair attempts after the initial implementation.
 
 - Contract artifacts implementers must read:
   - `docs/contracts.md`
-- Next step: `$lean-story-delivery`, starting with US-01 and retaining its required
-  failure/isolation gates. US-02 adds repair recovery; US-03 adds manual requeue.
+- Current implementation: `docs/slices/current-slice.md`, US-01 active with required
+  failure/isolation gates. US-02 repair recovery and US-03 manual-requeue delivery
+  remain deferred. Implementation limits and operator preparation are in `README.md`.
 - List `docs/contracts.md` under `## Contract Inputs` in
   `docs/slices/current-slice.md` when slice planning creates that file. No slice
   note or implementation is created by this contract-writing step.
