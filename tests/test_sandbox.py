@@ -114,11 +114,11 @@ def test_ephemeral_anonymous_volumes_and_bridge_networks(tmp_path: Path) -> None
 def test_sandbox_runs_commands_with_snapshot_and_secret_only_on_stdin(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from software_factory.sandbox import Sandbox
+    from software_factory.sandbox import PI_FLAGS, Sandbox
 
     commands = Mock()
     commands.run.return_value = ""
-    sandbox = Sandbox(prepare=compose(tmp_path), service="agent", directory=tmp_path, commands=commands)
+    sandbox = Sandbox(prepared_compose=compose(tmp_path), service="agent", directory=tmp_path, commands=commands)
     sandbox.start()
     sandbox.setup()
     sandbox.implement(
@@ -137,7 +137,9 @@ def test_sandbox_runs_commands_with_snapshot_and_secret_only_on_stdin(
     assert phases == ["sandbox startup", "required entrypoints", "setup", "implementation", "verification"]
     implementation = calls[3]
     assert "private-token-value" not in " ".join(implementation.args[0])
-    assert json.loads(implementation.kwargs["input"])["snapshot"]["title"] == "$(touch /host)"
+    payload = json.loads(implementation.kwargs["input"])
+    assert payload["snapshot"]["title"] == "$(touch /host)"
+    assert payload["flags"] == PI_FLAGS
     assert calls[2].args[0][-1] == "./scripts/setup"
     assert calls[4].args[0][-1] == "./scripts/verify"
     assert (tmp_path / "compose.json").exists()

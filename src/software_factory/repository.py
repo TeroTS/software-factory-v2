@@ -54,14 +54,14 @@ class Repository:
             env=self.env,
         )
 
-    # Fetch and check out the current default branch with no submodules or repository scripts run on the host.
+    # Fetch the supplied branch from URL into the workspace and return its SHA; run no submodules or host scripts.
     def checkout(self, url: str, branch: str) -> str:
         self.git("check-ref-format", "refs/heads/" + branch)
         self.git("fetch", "--no-tags", "--", url, "refs/heads/" + branch)
         self.git("checkout", "--force", "--detach", "FETCH_HEAD")
         return self.git("rev-parse", "HEAD").strip()
 
-    # Stage current files using only trusted Git metadata, require changes, and create a runner-owned commit.
+    # Stage with trusted metadata and commit with the issue number in its message; return SHA or fail if unchanged.
     def commit(self, number: int) -> str:
         # shortcut: nested repositories are rejected; add safe gitlink handling when a target needs submodules.
         for directory, dirs, files in os.walk(self.workspace, followlinks=False):
@@ -75,9 +75,10 @@ class Repository:
         self.git("commit", "--no-gpg-sign", "-m", f"Implement issue #{number}")
         return self.git("rev-parse", "HEAD").strip()
 
-    # Refuse an existing factory branch and push once without force; ambiguous outcomes require operator inspection.
+    # Create the issue's factory branch at URL only if absent; ambiguous failures require operator inspection.
     def push(self, url: str, number: int) -> None:
         ref = f"refs/heads/factory/issue-{number}"
         if self.git("ls-remote", "--heads", "--", url, ref).strip():
             raise FactoryError("remote factory branch already exists; operator cleanup required")
-        self.git("push", "--porcelain", "--", url, "HEAD:" + ref)
+        # An empty expected ref makes the lease create-only, rejecting even fast-forwards of existing branches.
+        self.git("push", "--porcelain", "--force-with-lease=" + ref + ":", "--", url, "HEAD:" + ref)

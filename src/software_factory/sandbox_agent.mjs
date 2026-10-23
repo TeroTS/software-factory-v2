@@ -28,16 +28,7 @@ try {
     PI_OFFLINE: "1",
     PI_TELEMETRY: "0",
   };
-  const flags = [
-    "--no-extensions",
-    "--no-mcp",
-    "--no-skills",
-    "--no-prompt-templates",
-    "--no-themes",
-    "--no-approve",
-    "--offline",
-    "--no-session",
-  ];
+  const flags = [...payload.flags, "--offline", "--no-session"];
   const catalog = spawnSync("pi", [...flags, "--list-models", payload.model], {
     env,
     encoding: "utf8",

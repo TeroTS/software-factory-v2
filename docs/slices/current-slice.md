@@ -37,7 +37,7 @@ Status: done
 
 ## Operations / Endpoints / Surfaces In This Slice
 - Contracted terminal entrypoint, strict four-field operator TOML, serial 30-second polling, exact duplicate/branch skips, confirmed claim, and immutable task snapshot.
-- Prepared Compose setup → noninteractive Pi/Copilot → one verification, container cleanup, nonempty-diff gate, trusted host commit/non-force push, draft PR, and success/failure reporting.
+- Prepared Compose setup → noninteractive Pi/Copilot → one verification, container cleanup, nonempty-diff gate, trusted host commit/create-only push, draft PR, and success/failure reporting.
 - Target-owned agent assets: `../factory-smoke-test/sandbox/agent/`; ignored host configuration: `artifacts/operator/factory-smoke-test.toml`.
 - No HTTP server, repair execution, automatic session resumption, merge, or review-driven revisions.
 - The approved acceptance run processed issue 7 only; no normal polling service was left running.

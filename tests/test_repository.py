@@ -94,6 +94,33 @@ def test_push_creates_new_branch_but_never_overwrites_existing(origin: Path, tmp
     assert git(origin, "rev-parse", "factory/issue-2") == first
 
 
+def test_push_rejects_branch_created_after_absence_check(
+    origin: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from software_factory.process import Commands, FactoryError
+    from software_factory.repository import Repository
+
+    directory = tmp_path / "run"
+    directory.mkdir()
+    repo = Repository(directory, Commands())
+    base = repo.checkout(str(origin), "main")
+    (repo.workspace / "hello.txt").write_text("change\n")
+    repo.commit(2)
+    original_git = repo.git
+
+    def create_branch_after_check(*args: str) -> str:
+        output = original_git(*args)
+        if args[0] == "ls-remote":
+            assert not output.strip()
+            git(origin, "branch", "factory/issue-2", base)
+        return output
+
+    monkeypatch.setattr(repo, "git", create_branch_after_check)
+    with pytest.raises(FactoryError, match="git push failed"):
+        repo.push(str(origin), 2)
+    assert git(origin, "rev-parse", "factory/issue-2") == base
+
+
 def test_nested_git_metadata_is_rejected_before_host_staging(origin: Path, tmp_path: Path) -> None:
     from software_factory.process import Commands, FactoryError
     from software_factory.repository import Repository

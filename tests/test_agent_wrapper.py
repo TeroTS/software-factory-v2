@@ -6,6 +6,8 @@ from pathlib import Path
 
 import pytest
 
+from software_factory.sandbox import PI_FLAGS
+
 NODE = shutil.which("node")
 
 
@@ -18,6 +20,7 @@ def test_agent_wrapper_uses_ephemeral_credentials_and_exact_model(tmp_path: Path
         "#!/usr/bin/env python3\n"
         "import json, os, pathlib, signal, sys\n"
         "home = pathlib.Path(os.environ['PI_CODING_AGENT_DIR'])\n"
+        "assert '--no-context-files' in sys.argv\n"
         "if '--list-models' in sys.argv:\n"
         f"    print('github-copilot {'other' if outcome == 'missing-model' else 'chosen'} 128k 4k')\n"
         f"    sys.exit({7 if outcome == 'catalog-failure' else 0})\n"
@@ -34,6 +37,7 @@ def test_agent_wrapper_uses_ephemeral_credentials_and_exact_model(tmp_path: Path
         "bearer": "private-bearer",
         "endpoint": "https://api.business.githubcopilot.com",
         "model": "chosen",
+        "flags": PI_FLAGS + ["--no-context-files"],
     }
     result = subprocess.run(
         [NODE, str(wrapper)],
@@ -65,6 +69,7 @@ def test_agent_wrapper_uses_ephemeral_credentials_and_exact_model(tmp_path: Path
         "--no-prompt-templates",
         "--no-themes",
         "--offline",
+        "--no-context-files",
     ]:
         assert flag in output["args"]
     assert output["args"][-4:] == ["--model", "chosen", "--tools", "read,bash,edit,write"]

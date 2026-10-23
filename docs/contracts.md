@@ -212,9 +212,11 @@ at most three repair attempts after the initial implementation.
   - PR body includes `Closes #<number>`.
   - Successful publication yields the actual created PR's URL for the issue
     status comment; a guessed URL is not a successful result.
-- Ordering / Idempotency expectations: Commit, push without force, create the
-  draft PR, then record success with its link. Never overwrite an existing remote
-  branch. Recheck observed remote state when publication outcomes are uncertain;
+- Ordering / Idempotency expectations: Commit, atomically create the remote
+  factory branch, create the draft PR, then record success with its link. Use an
+  empty expected-ref lease (`--force-with-lease=refs/heads/factory/issue-<number>:`)
+  to require branch absence at push time; this never permits updating an existing
+  branch, even by fast-forward. Recheck observed remote state when publication outcomes are uncertain;
   the next explicitly requeued attempt applies Contract 2 before any execution.
   A push that succeeds before PR creation fails may leave a branch requiring
   operator cleanup. Do not create duplicate PRs or rewrite history to recover.

@@ -108,13 +108,13 @@ def copilot_endpoint(bearer: str) -> str:
 # Own a unique Compose project and immutable host-side configuration outside the exposed workspace.
 class Sandbox:
     # Persist the prepared configuration outside the workspace; commands share the issue-run deadline.
-    def __init__(self, prepare: dict, service: str, directory: Path, commands: Commands) -> None:
+    def __init__(self, prepared_compose: dict, service: str, directory: Path, commands: Commands) -> None:
         self.service = service
         self.commands = commands
         self.directory = directory
         self.env = docker_environment(directory / "workspace")
         self.path = directory / "compose.json"
-        self.path.write_text(json.dumps(prepare))
+        self.path.write_text(json.dumps(prepared_compose))
         self.project = "factory-" + uuid.uuid4().hex
         self.base = [
             "docker",
@@ -153,7 +153,9 @@ class Sandbox:
             "implementation",
             cwd=self.directory,
             env=self.env,
-            input=json.dumps({"snapshot": snapshot, "bearer": bearer, "endpoint": endpoint, "model": model}),
+            input=json.dumps(
+                {"snapshot": snapshot, "bearer": bearer, "endpoint": endpoint, "model": model, "flags": PI_FLAGS}
+            ),
         )
 
     # Run the repository's canonical verification command once; a nonzero exit fails US-01 without repairs.
