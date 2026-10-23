@@ -277,7 +277,11 @@ at most three repair attempts after the initial implementation.
 - List `docs/contracts.md` under `## Contract Inputs` in
   `docs/slices/current-slice.md` when slice planning creates that file. No slice
   note or implementation is created by this contract-writing step.
-- Deployment prerequisite: merge the smoke-test preparation branch into its
-  default branch before using default-branch clones. Its current verification
-  image does not contain Pi; the operator-prepared agent service must satisfy
-  Contract 3 before claiming a complete coding run.
+- Deployment prerequisite satisfied locally: smoke-test preparation is merged
+  into `main` at `6b5315e706831f5b1e6201d7cb4d0febe66d12fb`, and the agent profile
+  owned by the local target checkout at `sandbox/agent/` passed setup, real Pi/Copilot
+  implementation, verification, and cleanup against it. The operator-owned four-field
+  `factory.toml` stays outside the target checkout (locally at ignored
+  `artifacts/operator/factory-smoke-test.toml`) and references the trusted Compose
+  path, preserving Contracts 1 and 3. A complete issue-to-PR acceptance run
+  remains separate and unpassed.

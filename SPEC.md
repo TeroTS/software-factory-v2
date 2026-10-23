@@ -4,7 +4,7 @@ Source: `DECISIONS.md`
 
 ## Summary
 - A local autonomous coding factory turns labeled GitHub issues into implemented, validated draft PRs for human review. A Python local runner orchestrates Pi using an existing Copilot subscription, Docker Compose sandboxes, and host-side GitHub CLI operations. Domain names follow `CONTEXT.md`.
-- The first target repository is `TeroTS/factory-smoke-test`. Feasibility evidence in `DECISIONS.md`: a minimal unattended Pi/Copilot Docker request passed without host GitHub write credentials. After operator-approved local preparation, the target's setup/verify passed in Compose in 2.72 seconds, with two tests and 100% line/branch coverage; image rebuild, validation, CLI execution, and cleanup totaled 9.60 seconds. Target preparation is pushed as `c6d5b76` on `chore/smoke-test-environment`; remote `main` remains unprepared until that branch is merged.
+- The first target repository is `TeroTS/factory-smoke-test`. Feasibility evidence in `DECISIONS.md`: a minimal unattended Pi/Copilot Docker request passed without host GitHub write credentials. After operator-approved local preparation, the target's setup/verify passed in Compose in 2.72 seconds, with two tests and 100% line/branch coverage; image rebuild, validation, CLI execution, and cleanup totaled 9.60 seconds. Target preparation was merged into `main` at `6b5315e706831f5b1e6201d7cb4d0febe66d12fb`. The operator-prepared agent profile is owned by the local `factory-smoke-test` checkout under `sandbox/agent/`; operator `factory.toml` stays outside that checkout. The profile has passed setup, a real Pi/Copilot local coding probe, verification, and cleanup against that commit. These checks do not establish the full issue-to-PR flow.
 
 ## Goals
 - Poll one trusted target repository every 30 seconds and execute one issue run at a time.
@@ -108,4 +108,4 @@ Deferred follow-ups:
 - None.
 
 ## Open Questions
-- None. Merging target preparation, testing automatic credential renewal, and demonstrating the full issue-to-PR flow remain delivery work; the completed probes do not prove those capabilities.
+- None. Target preparation is merged and the agent environment has passed a local coding/verification probe. Testing automatic credential renewal and demonstrating the full issue-to-PR flow remain delivery work; the completed probes do not prove those capabilities.

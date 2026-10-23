@@ -30,7 +30,34 @@ The host needs Git, authenticated GitHub CLI, Pi with authenticated Copilot acce
 (the tested Pi version is 1.3.0), and running Docker with Compose.
 Only one runner may operate on the configured repository; there is no distributed lock.
 
-Before starting the runner:
+The first target owns its agent Dockerfile and Compose profile at
+`../factory-smoke-test/sandbox/agent/` (sibling target checkout), not in this
+factory repository. The image pins Node 22.19.0, Python 3.14.3, uv 0.5.13, and
+Pi 1.3.0. Keep operator-owned configuration at ignored
+`artifacts/operator/factory-smoke-test.toml`, outside the target checkout and run
+workspace. Its `compose_file` points to the absolute path of the target checkout's
+`sandbox/agent/compose.yaml`; it contains no credentials.
+Build for the host workspace owner, then validate without GitHub writes:
+
+```sh
+docker build --build-arg RUN_UID="$(id -u)" --build-arg RUN_GID="$(id -g)" \
+  -t software-factory-smoke-agent:pi1.3.0-python3.14.3 ../factory-smoke-test/sandbox/agent
+FACTORY_SMOKE_SANDBOX_TESTS=1 uv run --frozen pytest tests/test_smoke_environment.py -s
+```
+
+The opt-in validation checks actual runtime versions, setup, verification, a real
+Pi/Copilot local-file change, re-verification, and cleanup against target `main`.
+It uses Copilot but never labels an issue, publishes a branch, or creates a PR.
+Sanitized evidence and private diagnostics stay under ignored
+`artifacts/smoke-sandbox-validation/`. Rebuild if the host UID/GID changes.
+
+When ready to process labeled issues (not part of the preparation probe):
+
+```sh
+uv run --frozen python -m software_factory --config artifacts/operator/factory-smoke-test.toml
+```
+
+For other prepared environments, follow these requirements:
 
 1. Prepare the trusted target repository's default branch with executable,
    noninteractive `./scripts/setup` and `./scripts/verify`. Verification must match CI.
@@ -139,8 +166,10 @@ FACTORY_E2E_APPROVED=1 FACTORY_E2E_CONFIG=/absolute/path/to/factory.toml \
   FACTORY_E2E_ISSUE=123 uv run --frozen pytest tests/test_e2e.py -s
 ```
 
-The live issue-to-PR test has not passed: the inspected smoke target's `main`
-still contains only Markdown files. See the current slice for remaining prerequisites.
+The smoke target preparation is merged into `main`, and the prepared agent profile
+has passed setup → real Pi/Copilot → verification locally against commit
+`6b5315e706831f5b1e6201d7cb4d0febe66d12fb`. The full issue-to-PR test still has not
+passed; select a dedicated issue and explicitly approve that separate live write test.
 
 ## Source layout
 
