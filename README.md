@@ -1,8 +1,10 @@
 # Autonomous Coding Factory
 
 A local Python runner turns `agent:implement` GitHub issues into sandbox-validated
-draft PRs. **US-01 implementation is in progress, not accepted end to end.**
-Repairs (US-02) and the manual-requeue delivery slice (US-03) are not implemented.
+draft PRs. **US-01 passed real end-to-end acceptance:**
+[issue 7](https://github.com/TeroTS/factory-smoke-test/issues/7) produced
+[draft PR 8](https://github.com/TeroTS/factory-smoke-test/pull/8), with independent CI green.
+Repairs (US-02) and successful manual-requeue delivery (US-03) remain deferred.
 See [SPEC.md](SPEC.md), [contracts](docs/contracts.md),
 [current slice](docs/slices/current-slice.md), and [domain vocabulary](CONTEXT.md).
 
@@ -166,10 +168,16 @@ FACTORY_E2E_APPROVED=1 FACTORY_E2E_CONFIG=/absolute/path/to/factory.toml \
   FACTORY_E2E_ISSUE=123 uv run --frozen pytest tests/test_e2e.py -s
 ```
 
-The smoke target preparation is merged into `main`, and the prepared agent profile
-has passed setup → real Pi/Copilot → verification locally against commit
-`6b5315e706831f5b1e6201d7cb4d0febe66d12fb`. The full issue-to-PR test still has not
-passed; select a dedicated issue and explicitly approve that separate live write test.
+The approved issue-to-PR acceptance test passed for issue 7 in 72.83 seconds,
+producing draft PR 8 from baseline `44a3e90`. Both target CI checks passed with
+13 tests and 100% line/branch coverage. The issue has its success link, the trigger
+label is removed, and run-owned containers are gone. Nothing was merged.
+
+GitHub discovery can lag immediately after label application. The harness permits
+up to three polls at 30-second intervals while the trigger remains present; it
+never reapplies the trigger after claim or retries a failed issue run. Do not
+rerun against issue 7's existing PR; select a fresh dedicated issue for another
+approved live test. See the [completion evidence](docs/slices/current-slice.md).
 
 ## Source layout
 

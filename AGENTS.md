@@ -12,7 +12,7 @@
 - Use standard-library logging with the development defaults in `logging.ini`: WARNING to stderr, no log files. Never log secrets or full transcripts.
 - Keep credentials and private run artifacts out of version control; `artifacts/` is ignored.
 - Target-specific agent Docker/Compose assets belong in the target repository (smoke target: `../factory-smoke-test/sandbox/agent/`). Keep operator TOML outside that checkout; local config is ignored `artifacts/operator/factory-smoke-test.toml`.
-- US-01 is active; read `docs/slices/current-slice.md` before continuing. Do not mark it done without the live issue-to-PR test.
+- Read `docs/slices/current-slice.md` before starting or resuming delivery; completion requires real story acceptance evidence. US-01's live evidence is recorded there.
 - Application packaging uses the pinned Hatchling backend in `pyproject.toml`; `./scripts/setup` installs it editable.
 
 ## Domain Vocabulary

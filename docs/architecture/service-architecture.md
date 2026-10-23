@@ -9,8 +9,10 @@ coordination state. There is no HTTP server, message broker, or database.
 - **Implemented:** backed by source, not necessarily proven against live services end to end.
 - **Integration-tested:** real Git/process/Docker tests and a real Pi/Copilot coding probe passed locally.
 - **Specified only:** US-02 repair recovery and US-03's successful manual-requeue acceptance flow.
-- **Not accepted end to end:** the live issue-to-linked-draft-PR test has not passed;
-  see [current slice](../slices/current-slice.md) and [live test](../../tests/test_e2e.py#L14).
+- **Accepted first-pass flow:** the approved [live test](../../tests/test_e2e.py#L15)
+  passed for [issue 7](https://github.com/TeroTS/factory-smoke-test/issues/7) →
+  [draft PR 8](https://github.com/TeroTS/factory-smoke-test/pull/8), with green
+  independent CI, linked status, trigger removal, and cleanup. See [completion evidence](../slices/current-slice.md).
 
 ## Architecture diagram
 
@@ -96,8 +98,8 @@ flowchart LR
 ## Assumptions and unresolved questions
 
 - **Operator-owned prerequisites:** only one runner operates on the repository; labels are not a distributed lock. Prepared images/configuration are trusted, contain no broader credentials, and provide the target's real dependency-backed checks. See [operator setup](../../README.md#operator-setup).
-- **Preparation ready; live acceptance pending:** the operator merged target preparation into `main` at `6b5315e706831f5b1e6201d7cb4d0febe66d12fb`. The agent profile owned by the sibling `factory-smoke-test` checkout at `sandbox/agent/` passed actual setup → Pi/Copilot → verification and cleanup against that commit through [the opt-in preparation test](../../tests/test_smoke_environment.py). Its operator-owned configuration stays outside the target checkout at ignored `artifacts/operator/factory-smoke-test.toml`. The full issue-to-PR test still requires a dedicated issue and explicit approval for live GitHub writes; preparation itself made none.
-- **Evidence limit:** the real Pi probe proves isolated coding/authentication, not a full GitHub issue-to-PR run or automatic credential renewal. The opt-in [end-to-end test](../../tests/test_e2e.py) remains unpassed. Earlier feasibility results in [DECISIONS.md L140-146](../../DECISIONS.md#L140) are recorded claims; their ignored raw artifacts are absent from this checkout.
+- **Preparation and first-pass acceptance verified:** the target owns its agent profile at `sandbox/agent/`; ignored host configuration stays at `artifacts/operator/factory-smoke-test.toml`. The approved issue 7 run started from target baseline `44a3e90` and published draft PR 8 at `2a008b2`. Both independent target CI runs passed with 13 tests and 100% line/branch coverage; [the current slice](../slices/current-slice.md) links their evidence. The PR remains draft and unmerged.
+- **Evidence limits and discovery timing:** live acceptance proves one successful first-pass issue run, not repair recovery, successful manual requeue, automatic credential renewal, or requirement fulfillment without human review. The first harness poll observed no issue immediately after label application, before any claim; bounded 30-second discovery polling and [regression checks](../../tests/test_e2e_harness.py) now handle that case without reapplying a claimed trigger. Earlier feasibility results in [DECISIONS.md L140-146](../../DECISIONS.md#L140) remain historical recorded claims; their ignored raw artifacts are absent from this checkout.
 - **Deferred behavior:** [US-02](../../SPEC.md#us-02-recover-a-verification-failure-through-bounded-repairs) adds up to three repairs; [US-03](../../SPEC.md#us-03-manually-requeue-a-failed-or-interrupted-issue) proves successful manual requeue. Neither is claimed complete here.
 - **Implementation limits:** Compose uses a fail-closed supported subset; images are prebuilt, dependency volumes anonymous, all capabilities dropped, and nested Git metadata rejected. These are documented constraints, not inferred support for arbitrary Compose environments.
 - **Residual risks:** internet-enabled agent code can exfiltrate sandbox-accessible data; GitHub writes/label changes are not atomic; a hard host crash may leave containers/status/branches; command output is buffered in host memory. Human review and operator cleanup remain necessary.

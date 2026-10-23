@@ -1,4 +1,5 @@
 import os
+import time
 from pathlib import Path
 
 import pytest
@@ -22,15 +23,25 @@ def test_operator_submits_issue_and_observes_linked_validated_draft_pr() -> None
     assert number > 0
     prepared = preflight(config)
     github = GitHub(config.repository, Commands())
-    assert github.discover() == [], "remove other trigger labels before starting this dedicated end-to-end test"
+    assert set(github.discover()) <= {number}, (
+        "remove other trigger labels before starting this dedicated end-to-end test"
+    )
     assert github.open_pr(number) is None
     assert not github.branch_exists(number)
     issue = github.api(f"issues/{number}")
     assert issue["state"] == "open" and "pull_request" not in issue
     inspect = ["docker", "ps", "-aq", "--filter", "label=com.docker.compose.project"]
     before = set(Commands().run(inspect, "inspect cleanup").splitlines())
-    github.api(f"issues/{number}/labels", method="POST", payload={"labels": ["agent:implement"]})
-    Runner(config, prepared).poll_once()
+    if not any(label["name"] == "agent:implement" for label in issue["labels"]):
+        github.api(f"issues/{number}/labels", method="POST", payload={"labels": ["agent:implement"]})
+    runner = Runner(config, prepared)
+    for delay in (0, 30, 30):
+        time.sleep(delay)
+        assert set(github.discover()) <= {number}, "another issue was queued during the dedicated test"
+        runner.poll_once()
+        current = github.api(f"issues/{number}")
+        if not any(label["name"] == "agent:implement" for label in current["labels"]):
+            break
     url = github.open_pr(number)
     assert url is not None, "inspect issue status and private artifacts; do not blindly rerun live writes"
     pr = github.api("pulls/" + url.rsplit("/", 1)[1])

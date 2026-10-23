@@ -47,8 +47,8 @@ at most three repair attempts after the initial implementation.
   files/services, and unavailable configured tooling with an actionable diagnostic.
   The configuration contains no credentials or arbitrary command templates.
   The default branch is discovered from GitHub, not configured separately.
-  The module is implemented under `src/software_factory/`; US-01 remains active
-  until the live issue-to-PR acceptance test passes.
+  The module is implemented under `src/software_factory/`; US-01's live acceptance
+  passed for issue 7 and draft PR 8. Evidence is in `docs/slices/current-slice.md`.
 - Ordering / Idempotency expectations: Validate configuration before claiming
   issues. The operator runs only one instance for the target repository; this
   interface does not provide distributed coordination or automatic resumption.
@@ -271,8 +271,8 @@ at most three repair attempts after the initial implementation.
 
 - Contract artifacts implementers must read:
   - `docs/contracts.md`
-- Current implementation: `docs/slices/current-slice.md`, US-01 active with required
-  failure/isolation gates. US-02 repair recovery and US-03 manual-requeue delivery
+- Current implementation: `docs/slices/current-slice.md`, US-01 done with real
+  issue-to-PR evidence and automated failure/isolation checks. US-02 repair recovery and US-03 manual-requeue delivery
   remain deferred. Implementation limits and operator preparation are in `README.md`.
 - List `docs/contracts.md` under `## Contract Inputs` in
   `docs/slices/current-slice.md` when slice planning creates that file. No slice
@@ -283,5 +283,7 @@ at most three repair attempts after the initial implementation.
   implementation, verification, and cleanup against it. The operator-owned four-field
   `factory.toml` stays outside the target checkout (locally at ignored
   `artifacts/operator/factory-smoke-test.toml`) and references the trusted Compose
-  path, preserving Contracts 1 and 3. A complete issue-to-PR acceptance run
-  remains separate and unpassed.
+  path, preserving Contracts 1 and 3. The complete approved issue-to-PR test passed
+  for issue 7 → draft PR 8, with green independent CI and verified cleanup.
+  Human review/merge remains external; repair recovery and successful manual-requeue
+  acceptance remain US-02/US-03 work.
