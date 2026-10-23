@@ -6,7 +6,8 @@ draft PRs. **US-01 passed real end-to-end acceptance:**
 [draft PR 8](https://github.com/TeroTS/factory-smoke-test/pull/8), with independent CI green.
 Repairs (US-02) and successful manual-requeue delivery (US-03) remain deferred.
 See [SPEC.md](SPEC.md), [contracts](docs/contracts.md),
-[current slice](docs/slices/current-slice.md), and [domain vocabulary](CONTEXT.md).
+[current slice](docs/slices/current-slice.md), [domain vocabulary](CONTEXT.md),
+and the [step-by-step issue-to-draft-PR workflow](docs/workflows/issue-to-draft-pr.md).
 
 ## Development
 
