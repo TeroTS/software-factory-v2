@@ -38,6 +38,7 @@ Turn labeled GitHub issues into implemented, locally validated draft pull reques
 ### Product / Scope
 
 - One trusted repository, one operator applying labels, one issue executing at a time.
+- The first target repository is `TeroTS/factory-smoke-test` (`https://github.com/TeroTS/factory-smoke-test`).
 - Every labeled issue is attempted regardless of ticket type or apparent ambiguity.
 - Passing repository validation plus a nonempty diff permits draft-PR publication; a human judges requirement fulfillment.
 - Up to three repair attempts follow the initial implementation attempt.
@@ -49,7 +50,7 @@ Turn labeled GitHub issues into implemented, locally validated draft pull reques
 - GitHub issues and draft PRs are the user interface; Pi runs unattended.
 - Claiming an issue removes `agent:implement` and records running status in GitHub.
 - Failures and interruptions require manual requeue by reapplying `agent:implement`.
-- An existing matching open PR prevents another execution; comment with its link instead.
+- When skipping because a matching open PR or existing remote factory branch is found, remove `agent:implement` and comment with the PR link or required branch cleanup. Another check requires explicit label reapplication.
 - No automatic merge and no automatic follow-up work on PR review comments.
 
 ### Data / State / Ownership
@@ -97,8 +98,8 @@ Turn labeled GitHub issues into implemented, locally validated draft pull reques
 
 1. Operator prepares a trusted repository's setup/verify scripts and Compose sandbox, authenticates GitHub CLI and Copilot, and starts the local runner.
 2. Runner discovers a labeled issue and checks for an existing factory PR or remote branch.
-3. If an open PR matches the configured head repository and exact head branch `factory/issue-<number>`, skip execution and comment with its link.
-4. If that remote branch exists without a matching open PR, stop processing the issue and request operator branch deletion before retrying. Never force-push or overwrite it.
+3. If an open PR matches the configured head repository and exact head branch `factory/issue-<number>`, remove `agent:implement`, skip execution, and comment with its link.
+4. If that remote branch exists without a matching open PR, remove `agent:implement`, skip execution, and request operator branch deletion before retrying. Never force-push or overwrite it. Reapply the label after cleanup to request another check.
 5. Otherwise claim the issue, record running status, snapshot its title/body, and create an isolated workspace from the default branch.
 6. Start the prepared sandbox, run setup, then let Pi implement the issue without a separate triage or clarification stage.
 7. Run verification and bounded repairs under the shared deadline.
@@ -136,7 +137,13 @@ Turn labeled GitHub issues into implemented, locally validated draft pull reques
 - The verified bootstrap pins Python 3.14.3 in `.python-version`, uv 0.5.13 in CI, and resolved development dependencies in `uv.lock`.
 - The 15-minute limit is a deliberate execution limit, not an inference that stalled output means a timeout.
 - Internet-enabled sandboxing carries residual exfiltration risk. Docker and human review do not make repository code or issue text trustworthy.
-- Actual unattended Copilot authentication, subscription availability, credential scoping, and Compose execution must be proven before claiming an end-to-end working MVP.
+- A minimal unattended Pi 1.3.0/Copilot request passed in Docker in 3.18 seconds using `github-copilot/gpt-6.1-sol`. Only a host-resolved Copilot bearer with at least 20 minutes of remaining lifetime was passed through stdin; no host directories, GitHub CLI credentials, or GitHub OAuth refresh token were mounted or supplied. The supplied bearer received HTTP 401 from GitHub's `/user` API.
+- The probe required `https://api.business.githubcopilot.com`, derived from the Copilot token's validated endpoint; the default individual endpoint returned HTTP 401. Do not assume all accounts use the individual endpoint.
+- A preliminary Compose check of this bootstrap repository passed `./scripts/setup` and `./scripts/verify` with seven tests in 2.96 seconds from a fresh workspace, plus an 11.72-second cold image build. The environment needed executable `/tmp` tmpfs for temporary executable test stubs; repository code was unchanged. This does not establish feasibility for the first target repository.
+- Initial inspection of `TeroTS/factory-smoke-test` at commit `8f5492ec85b50733f49795e819f5f5f2a8c9c325` found only four Markdown files and no required entrypoints. Compose preflight correctly failed with exit 2 in 4.24 seconds.
+- With operator approval, the local `chore/smoke-test-environment` checkout now includes a minimal Python readiness CLI, two behavior tests, locked tooling, setup/verify scripts, CI, and a Compose verification environment. Both tests were observed failing before the application was added.
+- The prepared target passed setup/verify in Compose in 2.72 seconds with 100% line and branch coverage. An uncached image-layer rebuild took 5.77 seconds with the base image already available; rebuild, verification, CLI execution, and cleanup totaled 9.60 seconds. No host GitHub credentials were passed; containers were removed. Evidence is under local ignored `artifacts/feasibility/target-probe/`.
+- Target preparation is committed as `c6d5b76` and pushed to `TeroTS/factory-smoke-test` on `chore/smoke-test-environment`; remote `main` still requires that branch to be merged before the factory can clone and use it. The smoke target has no dependency services. These probes do not establish a full issue-to-PR coding run or automatic credential renewal.
 - Factory behavior changes require automated tests; its CI must execute coverage with at least 80% overall coverage for this new project, excluding generated/framework boilerplate rather than business logic.
 
 ## Assumptions
@@ -149,10 +156,9 @@ Turn labeled GitHub issues into implemented, locally validated draft pull reques
 
 ## Open Questions
 
-- Can the actual Copilot account authenticate Pi unattended within the chosen sandbox arrangement without exposing host GitHub write credentials? This is a feasibility check, not permission to weaken credential isolation or switch billing providers.
-- Does the first target repository's prepared Compose environment run its real setup and verification successfully within 15 minutes? Runtime/image/service details must be validated during onboarding.
+- None currently. Target preparation must still be merged into its default branch, and end-to-end factory behavior remains to be implemented and tested.
 
 ## Ready for Spec Generation
 
 - Status: yes
-- Reason: Product scope, workflow, validation gates, retry/deadline behavior, duplicate protection, state ownership, interfaces, and safety boundaries are explicit. `$decision-to-spec` can proceed without inventing policy. The remaining questions are implementation-feasibility checks; failures must be surfaced, not resolved by silently changing the locked decisions.
+- Reason: Product scope, workflow, validation gates, retry/deadline behavior, duplicate protection, state ownership, interfaces, and safety boundaries are explicit. `$decision-to-spec` can proceed without inventing policy. Minimal Copilot authentication and the locally prepared target's Compose validation have passed feasibility checks. Merging target preparation and proving the full factory workflow remain delivery work, not unresolved product policy.
