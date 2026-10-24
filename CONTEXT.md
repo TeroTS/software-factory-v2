@@ -1,5 +1,9 @@
 # Domain Vocabulary
 
+Execution terms reflect the accepted direction in [DECISIONS.md](DECISIONS.md);
+the Docker-enabled model is not yet implemented. Behavior and interface contracts
+remain in [SPEC.md](SPEC.md) and [docs/contracts.md](docs/contracts.md).
+
 ## Canonical Terms
 
 ### Autonomous coding factory
@@ -12,7 +16,7 @@ The person who prepares the target repository, runs the factory, applies trigger
 
 ### Target repository
 
-The single trusted GitHub repository configured for the factory, with prepared setup/verify commands and a sandbox environment.
+The single trusted GitHub repository configured for the factory. It supplies the setup/verify entrypoints, application/dependency configuration, and tests used during issue runs.
 
 ### Issue
 
@@ -25,6 +29,18 @@ The factory actor that polls for labeled issues, manages one issue run at a time
 ### Issue run
 
 One attempt to process an issue from claim to success or failure, including setup, initial implementation, and any repair attempts under one 15-minute deadline.
+
+### Shared agent image
+
+The factory-maintained, versioned Linux image providing Pi and baseline development tools across target repositories. The operator builds it before starting the local runner; it is not a target application image.
+
+### Agent environment
+
+The per-issue-run execution environment where setup, Pi implementation, verification, and repairs run. In the accepted Docker-enabled model, it uses the shared agent image and local Docker engine access; it is not a security boundary protecting the host.
+
+### Run-owned resources
+
+Docker containers, networks, and disposable volumes identified as belonging to one issue run by its unique Compose project or factory-provided run label. This identity scopes cooperative cleanup, not access control; shared images, build cache, and untracked resources are outside it.
 
 ### Repair attempt
 

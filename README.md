@@ -6,6 +6,11 @@ It processes one issue at a time for one trusted target repository. GitHub holds
 coordination state; there is no database, HTTP server, or hosted deployment.
 Independent CI and human review follow publication; the factory never merges.
 
+The Docker-enabled shared-image refactor is accepted in [DECISIONS.md](DECISIONS.md)
+but **not implemented**. Commands, configuration, and security boundaries below
+describe the current prepared-Compose runtime. The planned `agent_image` and
+`artifacts_dir` fields are not supported yet.
+
 ## Quick Start
 
 Run commands from this repository's root. Development prerequisites:
@@ -134,9 +139,11 @@ repository; labels are not a distributed lock.
 
 The locally prepared target owns its agent Dockerfile and Compose profile at
 `../factory-smoke-test/sandbox/agent/`, not in this repository. Its image pins
-Node 22.19.0, Python 3.14.3, uv 0.5.13, and Pi 1.3.0. Operator configuration is
-ignored `artifacts/operator/factory-smoke-test.toml`; `compose_file` points to the
-absolute target Compose path. These local files are not provided by a fresh clone.
+Node 22.19.0, Python 3.14.3, uv 0.5.13, and Pi 1.3.0. The suggested ignored operator
+configuration path is `artifacts/operator/factory-smoke-test.toml`; `compose_file`
+points to the absolute target Compose path. These local files are not provided by
+a fresh clone. If the configuration was deleted, recreate it using the four-field
+TOML above before running this probe.
 
 With that target checkout and operator configuration prepared, build for the
 host workspace owner and validate without GitHub writes:
@@ -206,6 +213,9 @@ Compose file**, not necessarily this repository. New run directories are mode 07
 logs are 0600. Successful run directories are removed; failures remain until operator
 deletion. Known Copilot bearers are redacted, but other sensitive source/output may remain.
 Never commit or publish credentials, workspaces, or transcripts; `artifacts/` is ignored.
+Deleting diagnostic run directories discards their evidence and does not stop Docker
+resources. Preserve any operator configuration stored under `artifacts/operator/`
+unless intentionally removing it too.
 
 | Symptom | Action |
 | --- | --- |

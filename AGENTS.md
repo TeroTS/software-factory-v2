@@ -5,6 +5,10 @@
 - Read [README.md](README.md) for setup and operator guidance.
 - Read [SPEC.md](SPEC.md) and [docs/contracts.md](docs/contracts.md) for affected
   behavior/interfaces, and [CONTEXT.md](CONTEXT.md) before naming domain concepts.
+- For execution-model changes, read [DECISIONS.md](DECISIONS.md). Its accepted
+  Docker-enabled shared-image direction is not implemented; this guide and README
+  describe the current prepared-Compose runtime. Update SPEC/contracts before
+  changing execution behavior; do not mix old isolation claims with Docker access.
 - Inspect affected callers, tests, configuration, and working-tree changes. Keep
   changes minimal and preserve unrelated work. Follow the Domain Vocabulary,
   Safety and Contract Invariants, and Commenting Convention sections below.
@@ -74,8 +78,9 @@ fresh dedicated issue. See [README live checks](README.md#verification-beyond-un
   Pi **1.3.0**), and Docker Compose. Authentication/access approval is manual.
 - Target-specific agent Docker/Compose assets belong in the target repository
   (smoke target: `../factory-smoke-test/sandbox/agent/`). Keep operator TOML outside
-  that checkout and run workspace; the existing ignored path is
-  `artifacts/operator/factory-smoke-test.toml`. These local assets are not in a fresh clone.
+  that checkout and run workspace; a suggested ignored path is
+  `artifacts/operator/factory-smoke-test.toml`. These local assets are not in a fresh clone;
+  recreate missing operator configuration from the README before opt-in checks.
 - Run artifacts default to `artifacts/` beside the configured Compose file, not
   necessarily this checkout. `FACTORY_WORKSPACE` is supplied by the runner.
 - Use standard-library logging: WARNING to stderr, no application log files.
@@ -86,7 +91,8 @@ fresh dedicated issue. See [README live checks](README.md#verification-beyond-un
 
 ## Domain Vocabulary
 
-- Use [CONTEXT.md](CONTEXT.md)'s canonical terms consistently in code, tests,
+- Read [CONTEXT.md](CONTEXT.md) before naming domain concepts.
+- Use its canonical terms consistently in code, tests,
   documentation, and user-facing output. Resolve conflicts before adding/renaming terms.
 - The accepted specification is authoritative for behavior; `CONTEXT.md` for naming.
 - An issue run is one fresh attempt under a shared 900-second deadline, including

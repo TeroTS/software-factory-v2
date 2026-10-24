@@ -1,111 +1,144 @@
 # Product Specification
 
-Source: `DECISIONS.md`
+Source: [DECISIONS.md](DECISIONS.md)
 
 ## Summary
-- A local autonomous coding factory turns labeled GitHub issues into implemented, validated draft PRs for human review. A Python local runner orchestrates Pi using an existing Copilot subscription, Docker Compose sandboxes, and host-side GitHub CLI operations. Domain names follow `CONTEXT.md`.
-- The first target repository is `TeroTS/factory-smoke-test`. Feasibility evidence in `DECISIONS.md`: a minimal unattended Pi/Copilot Docker request passed without host GitHub write credentials. After operator-approved local preparation, the target's setup/verify passed in Compose in 2.72 seconds, with two tests and 100% line/branch coverage; image rebuild, validation, CLI execution, and cleanup totaled 9.60 seconds. Target preparation was merged into `main` at `6b5315e706831f5b1e6201d7cb4d0febe66d12fb`. The operator-prepared agent profile is owned by the local `factory-smoke-test` checkout under `sandbox/agent/`; operator `factory.toml` stays outside that checkout. The profile has passed setup, a real Pi/Copilot local coding probe, verification, and cleanup against that commit. Those preparation checks alone did not establish issue-to-PR behavior. The approved US-01 live test subsequently passed: issue 7 produced draft PR 8 (`2a008b2`), both target CI checks passed with 13 tests and 100% line/branch coverage, the issue received its PR link, and containers were removed. US-02's approved live recovery test also passed: issue 9 produced draft PR 10 (`f4971d2`) after one canonical verification failure (format check) and one Pi/Copilot repair; repeated verification and both independent target CI runs passed with 18 tests and 100% line/branch coverage. US-03's approved live acceptance also passed: issue 13 was interrupted during real Pi execution, remained idle across a runner restart, and produced draft PR 14 (`d985c29`) after explicit manual requeue with an edited task snapshot. Both target CI runs passed with 8 tests and 100% line/branch coverage; the previous failed workspace/log remain retained. Evidence: `docs/slices/current-slice.md` and `README.md`.
+- Replace target-specific factory sandboxes with one shared Linux agent image connected to the existing local Docker engine. The autonomous coding factory still turns labeled GitHub issues into verified draft PRs using Pi/Copilot and trusted host publication. Domain names follow [CONTEXT.md](CONTEXT.md).
+- This is the accepted target behavior, not a claim of implementation. Historical US-01–US-03 cover the previous execution model; their recorded acceptance does not establish the Docker-enabled model. US-04–US-07 below are the new backlog. Existing contracts must be updated before implementation.
+- Docker access grants effective engine control and potentially host control. The agent environment is not a security boundary protecting host files, credentials, or other containers. The operator accepts this exposure; normal credential separation remains useful but cannot prevent deliberate Docker-mediated access.
 
 ## Goals
-- Poll one trusted target repository every 30 seconds and execute one issue run at a time.
-- Attempt every issue labeled `agent:implement`, without ticket classification, requirements triage, or clarification questions.
-- Publish a draft PR only when repository verification passes and changes exist.
-- Permit three repair attempts after the initial implementation, within one 15-minute issue-run deadline.
-- Demonstrate a real issue-to-PR run and test failure, timeout, duplicate-protection, and manual-requeue behavior.
-- Keep durable coordination in GitHub, without a database or automatic session recovery.
-- Use automated tests and CI coverage of at least 80% for application code; exclude generated/framework boilerplate, not business logic.
+- Use one factory-maintained, versioned, native `linux/arm64` agent image across target repositories, without target-specific factory agent images or Compose definitions.
+- Build target images, start ordinary application/dependency Compose services, and execute service-backed E2E verification from the agent environment.
+- Support local ARM64 Linux containers, including Apple Silicon macOS with a local Docker provider; use the same absolute workspace path on host and agent.
+- Preserve one repository/runner, serial issue runs, 30-second polling, a shared 900-second deadline, three verification repairs, duplicate protection, create-only publication, and fresh manual requeue.
+- Clean known run-owned resources on success and failure while preserving unrelated resources and private failed-run diagnostics.
+- Validate real local Docker/macOS boundaries, run Docker integration CI on ARM64, and preserve format/lint/tests and the Python and Node 80% coverage gates.
+- Replace the old execution path completely, reusing coordination/publication logic and removing obsolete validation, configuration, fixtures, and tests as replacements land.
 
 ## Non-Goals
-- Multiple repositories, simultaneous runners, or parallel issue runs.
-- A separate authorization/eligibility gate, issue refinement, or interactive agent conversations.
-- Automatic merging or PR revisions from review feedback.
-- Webhooks, HTTP APIs, dashboards, chat UI, or OpenHands Canvas.
-- LangGraph, OpenHands, PostgreSQL, a GitHub App, or separately billed model APIs.
-- Automatic target-repository hardening, sandbox preparation, or interrupted-session resumption.
-- Using issue comments, attachments, or linked pages as task inputs.
+- Multiple repositories, simultaneous runners, parallel issue runs, eligibility analysis, or clarification conversations.
+- Automatic merging, PR review-feedback revisions, automatic requeue, or interrupted-session recovery.
+- A database, HTTP API, dashboard, new orchestration framework, parallel legacy backend, or automatic configuration migration.
+- Remote Docker engines, factory-managed VMs, cloud provisioning/deployment, AMD64 emulation, or general multi-architecture support.
+- Transparent sibling-service `localhost` compatibility, a Pi bootstrap phase before setup, setup repair, or host-side target-tool installation.
+- Automatic shared-agent-image builds/pulls by the runner, daemon-wide pruning, automatic deletion of untracked resources, or hard-crash cleanup.
+- Exact-image local tryouts, retained verified-image manifests, image archives, or a tryout launcher. The operator manually checks out the PR instead.
+- A new live Copilot-to-GitHub-PR demonstration as a completion gate. Live authenticated checks require separate approval.
+- Issue comments, attachments, or linked pages as task inputs; separately billed provider fallback.
 
 ## User Stories
 
-### US-01: Turn a labeled issue into a validated draft PR
+### US-04: Start the runner with a shared agent image
 Primary actor: Operator
 
-Trigger: An issue receives `agent:implement` while the configured local runner is running.
+Trigger: The operator is ready to run the factory against one trusted target repository.
 
-Happy-path action: Submit the issue for unattended implementation.
+Happy-path action: Start the runner with operator-owned configuration and a locally built shared agent image.
 
-Visible outcome: A draft PR containing validated changes is linked from the issue.
+Visible outcome: The runner validates its prerequisites and begins polling without requiring a target-specific factory sandbox.
+
+Authoritative state transition: Stopped runner with supplied configuration → validated runner polling the configured repository.
+
+Slice boundary: One terminal startup-to-polling outcome through configuration, shared-image availability, local Docker readiness, artifact-root usability, and actionable startup failures. Test startup without processing a real GitHub issue.
+
+Acceptance criteria:
+- Preserve the existing terminal invocation. Require exactly four nonempty TOML strings: `repository`, `model`, `agent_image`, and `artifacts_dir`, with no credentials or defaults. Preserve GitHub `owner/name` and exact accessible `github-copilot` model semantics; reject invalid, missing, wrong-type, or unknown fields.
+- Reject old `compose_file`/`compose_service` configuration with migration guidance. Do not reinterpret it, automatically migrate it, or retain the old backend.
+- Resolve relative artifact paths against the TOML directory. Validate artifact-root usability before claims where possible; never move/delete previous artifacts implicitly.
+- Supply the shared image definition/build instructions in this factory repository. Its pinned baseline includes Pi, Node.js/npm, Docker CLI/Compose, Python/uv, Bash, Git, Make, a C/C++ toolchain, curl, CA certificates, tar, unzip, and standard Linux utilities, without baked-in credentials.
+- The operator builds the image before startup. Require a compatible local native `linux/arm64` image and resolve it to an immutable image ID for the runner session. Updating it requires restart; missing/incompatible images fail startup without automatic builds, pulls, or fallback.
+- Check host tools/authentication and local engine/execution prerequisites before claiming issues where possible. Reject unsupported architecture rather than silently using emulation. Fail startup nonzero with safe, actionable diagnostics.
+- Retain one runner instance per configured repository, serial execution, and 30-second polling. Labels are not a distributed lock; authentication/access approval remains manual.
+- A focused startup test reaches polling using the new configuration and shared image; negative tests cover legacy configuration, invalid fields, unavailable/incompatible images, unusable artifact paths, and engine failures.
+
+Deferred follow-ups:
+- US-05: Publish a first-pass result using Docker-enabled execution.
+- US-06: Recover failed verification in that environment.
+- US-07: Manually requeue failed or interrupted work.
+
+### US-05: Turn a labeled issue into a Docker-verified draft PR
+Primary actor: Operator
+
+Trigger: An issue receives `agent:implement` while the validated runner is polling.
+
+Happy-path action: Submit the issue for unattended implementation and verification using the target's ordinary application services.
+
+Visible outcome: The issue links to a draft PR containing nonempty verified changes, after owned execution resources are cleaned up.
 
 Authoritative state transition: Unclaimed labeled issue → GitHub-recorded successful issue run linked to a draft PR.
 
-Slice boundary: One first-pass issue-to-PR outcome through terminal operation, GitHub coordination, a real Compose sandbox, Pi/Copilot implementation, repository verification, and host-side publication. Include an end-to-end success demonstration and automated checks of its safety and failure gates; no separate UI or database.
+Slice boundary: One first-pass issue-to-draft-PR outcome through existing GitHub coordination, a fresh shared-image agent environment, real Docker build/Compose/service-backed verification, scoped cleanup, and trusted host publication. Required failure and trust-boundary checks belong in this slice, not a later cleanup story.
 
 Acceptance criteria:
-- With the runner configured and authenticated for one trusted target repository, a poll discovers the labeled issue and starts no concurrent issue run. Only one runner instance may operate on that repository; labels are not a distributed lock.
-- Before implementation, detect an open PR by exact head repository and head branch `factory/issue-<number>`. If found, remove `agent:implement`, skip execution, preserve the PR, and comment with its link. Do not use PR-body text for duplicate detection; other branch names are outside detection.
-- If that remote factory branch exists without a matching open PR, remove `agent:implement`, skip execution, and request operator branch deletion before retrying. Never overwrite or force-push the branch. After either skip, another check requires explicit label reapplication; subsequent polls do not repeat the notification without it.
-- Claim the issue by removing `agent:implement` and recording running status in GitHub. Snapshot its title/body and start a fresh isolated workspace from the default branch. Later issue edits do not change this run's inputs.
-- Pi receives the snapshot and repository contents, attempts the work regardless of issue type or ambiguity, and asks no clarification questions. Do not retrieve issue-thread, attachment, or linked-page context.
-- Use an operator-prepared repository-specific Compose environment, including required databases or other local services. Execute repository setup, agent commands, and verification inside the sandbox, not on the host.
-- Allow internet access for dependencies and Copilot, but expose no host directories beyond the run workspace, no host Docker socket, and no GitHub write credentials. Supply only Copilot-required credentials; host publication credentials and broader host Pi configuration remain outside the sandbox. Internet access retains an exfiltration risk.
-- Require noninteractive, deterministic `./scripts/setup` and `./scripts/verify`, with verification matching CI and the repository's documented dependency-backed checks. Missing scripts, setup failure, sandbox failure, or unavailable Copilot access fail visibly; do not invent commands or switch billing providers.
-- Run setup before implementation and verification after implementation. A nonzero verification exit is not success; repair recovery is specified in US-02.
-- When verification passes with changes, commit and push `factory/issue-<number>`, open a draft PR containing `Closes #<number>`, and record success with its link. Do not claim success when commit, push, or PR creation fails.
-- When verification passes without changes, fail with a `no changes produced` issue comment and no PR.
-- Enforce one 15-minute wall-clock deadline for the complete issue run, including setup and implementation. Expiry stops execution and fails the run; do not publish unvalidated results or deliberately continue publication after expiry.
-- For failures, record a concise issue summary and retain the failed workspace and logs locally until operator deletion. Do not post full transcripts or expose credentials in shared output. Publication/reporting errors must remain visible rather than being represented as success.
-- Stop and remove run-owned containers on completion or operator stop. An interruption must not cause automatic restart; retained work is diagnostic, not a checkpoint for resumption.
-- Independent CI and human review follow publication. Passing checks does not prove requirement fulfillment; the human reviewer owns merge decisions. The factory neither merges nor revises the PR from review comments.
+- Attempt every labeled issue without classification or clarification. Before execution, check for an open PR matching the exact configured head repository and `factory/issue-<number>`. If found, remove the trigger, preserve the PR, and comment with its link; do not infer identity from body text or other branch names.
+- If that remote branch exists without a matching open PR, remove the trigger, skip execution, and request operator branch cleanup and label reapplication. Never overwrite/delete the branch. Confirm trigger removal before execution or skip notification; do not blindly retry uncertain writes.
+- Otherwise claim the issue, record running status, snapshot title/body, and create a fresh workspace from the discovered default branch. Later edits, issue-thread content, attachments, and linked pages do not become run inputs.
+- Start one root agent container per issue run using the session's resolved image, local Docker engine access, and a workspace mount at the same absolute path on host and agent. Normal mounts/environment exclude broader host directories/configuration and GitHub publication credentials, despite Docker access being able to bypass these limits.
+- Run setup → Pi implementation → verification inside that environment. Require executable, deterministic, noninteractive `./scripts/setup` and `./scripts/verify`, with verification aligned to target CI. Setup installs any nonbaseline toolchain prerequisites; missing entrypoints or setup failure fails before Pi runs. Do not invent replacement commands or setup repair.
+- Allow target image builds, ordinary Compose startup, and service-backed checks. Native `linux/arm64` is required for application/dependency execution; unsupported images/tools fail visibly instead of silently using AMD64 emulation or replacements.
+- Use explicit test service addresses: Compose DNS when the agent joins the relevant network, or the Docker host address for published ports. Sibling containers do not share the agent's localhost; transparent forwarding is not required.
+- Preserve exact-model Copilot invocation, stdin-only bearer delivery, validated endpoint metadata, temporary configuration, disabled discovered resources, and nonpersistent sessions. Keep broader host Pi settings, refresh credentials, and GitHub write credentials out of normal agent inputs; never fall back to another billing provider.
+- All phases, including workspace preparation, installation/builds, execution, checks, and publication, share one original 900-second deadline. Expiry stops work and fails the run; do not deliberately continue publication after expiry. Bounded cleanup is still required after expiry or interruption.
+- Assign a unique run identity. Ordinary Compose commands inherit `COMPOSE_PROJECT_NAME`; direct containers/networks/volumes must use the factory-provided run label. These are cooperative conventions, not security controls; overrides, unlabeled commands, or other contexts can bypass them.
+- Keep sufficient host-owned identity for cleanup independent of agent-modified Compose files. Stop/remove owned containers before owned networks and disposable owned volumes. Never execute agent-authored teardown scripts on the host, infer ownership from disuse, or prune broadly. Leave unrelated/shared resources, images, build cache, and untracked resources alone; unknown resources and hard-crash leftovers require operator inspection.
+- Stop workspace-mutating processes/services and finish required cleanup before host commit/publication. Cleanup failure blocks publication and retains diagnostics. Workspace files must remain readable/writable by the host operator after success or failure.
+- With passing verification, completed cleanup, time remaining, and a nonempty diff, commit using trusted host Git metadata, create the absent remote factory branch, open a draft PR containing `Closes #<number>`, and comment with the actual URL. Ignore agent-authored Git hooks/configuration during host publication. Empty output fails as `no changes produced`; commit/push/PR/reporting failures remain visible, with inspection rather than blind retries of uncertain publication.
+- Failures receive concise issue summaries when possible and retain private local workspaces/logs until operator deletion. Use 0700 run directories, 0600 logs, and known-credential redaction; never publish full transcripts or secrets. Successful diagnostics/workspaces may be removed. Independent target CI and human review remain required; the factory neither merges nor revises from review feedback.
+- Demonstrate the focused flow with real Docker build/Compose/service-backed verification and scripted Pi/GitHub boundaries. Also verify same-path sibling bind mounts, target-specific installation, socket access, host file ownership, and a macOS browser reaching a published application port on the actual local provider. Linux CI alone does not prove desktop sharing/networking.
+- Test cleanup on success, setup/verification failure, timeout, interruption, and partial startup, including cleanup failure blocking publication. Preserve an unrelated sentinel container/network/volume. Test credentials, architecture failures, deadline, duplicates, empty output, publication failures, and private diagnostic retention.
+- Preserve useful existing coordination, deadline, credential-validation, verification-feedback, and publication logic. Complete the removal audit: one execution path, no obsolete callers/compatibility backend, and no obsolete fixtures retained solely to keep removed code alive. Update current instructions, configuration guidance, and architecture/workflow docs to the new model without obsolete isolation claims.
+- Run format/lint/tests and real Docker integration checks on ARM64 with unchanged Python overall line/branch and Node line/branch/function 80% coverage gates. Distinguish scripted boundaries from real services; no live Copilot/GitHub-writing demonstration is required or implicitly authorized.
 
 Deferred follow-ups:
-- US-02: Recover a verification failure through bounded repairs.
-- US-03: Manually requeue a failed or interrupted issue.
+- US-06: Recover a verification failure using bounded repairs.
+- US-07: Manually requeue failed or interrupted work.
 
-### US-02: Recover a verification failure through bounded repairs
+### US-06: Recover a Docker-enabled verification failure
 Primary actor: Operator
 
-Trigger: Verification fails after the initial implementation of a submitted issue.
+Trigger: Verification fails after the initial implementation in the Docker-enabled agent environment.
 
-Happy-path action: Let the factory repair the failed verification without intervention.
+Happy-path action: Allow the factory to repair failed verification without intervention.
 
-Visible outcome: A draft PR is published after a permitted repair passes verification.
+Visible outcome: A draft PR is linked after a permitted repair passes verification and cleanup succeeds.
 
 Authoritative state transition: Running issue run with failed verification → GitHub-recorded successful issue run linked to a draft PR.
 
-Slice boundary: One recovery-to-PR outcome within the issue run established by US-01, including failure feedback to Pi, re-verification, and publication. Demonstrate recovery end to end and test exhaustion and shared-deadline behavior.
+Slice boundary: One recovery-to-PR outcome using the same agent environment, workspace, canonical verification command, and original deadline. Preserve all US-05 ownership, credential, cleanup, and publication gates.
 
 Acceptance criteria:
-- Give Pi the failed verification output, let it repair the changes, and run the same `./scripts/verify` again. Do not require operator interaction.
-- Permit at most three repair-and-verify cycles after the initial implementation; do not count the initial implementation as a repair attempt.
-- Stop repairing at the first successful verification and publish only if changes exist, using all US-01 publication and isolation gates.
-- If the third repair still fails verification, mark the issue run failed, post a concise failure summary, retain local failure artifacts, and create no PR.
-- The original 15-minute deadline includes every repair and verification cycle; it never resets. Expiry fails the run even when repair attempts remain.
-- Automated tests cover successful repair, exactly three unsuccessful repairs, and deadline expiry during recovery. Setup, provider, or publication failures do not silently consume extra repair cycles as if they were verification failures.
+- Give Pi the failed verification output, unchanged issue snapshot, and current workspace; run the same `./scripts/verify` after the repair. Do not reset the agent environment, issue run, or deadline.
+- Permit at most three repair-and-verify cycles after initial implementation. Stop at the first passing verification and publish only nonempty changes after required cleanup, using US-05 gates.
+- Setup, missing entrypoints, provider, Docker lifecycle, cleanup, deadline, and publication failures do not authorize extra verification repair attempts.
+- A third unsuccessful repair or deadline expiry fails the run, attempts bounded cleanup, retains private diagnostics, and creates no PR. Installing/building during repairs consumes the original deadline.
+- A focused recovery test demonstrates service-backed verification failing, receiving repair feedback, then passing and reaching publication. Tests also cover exactly three unsuccessful repairs, deadline expiry during recovery, cleanup after exhaustion, and cleanup failure blocking publication. Scripted Pi/GitHub boundaries are not live acceptance.
 
 Deferred follow-ups:
-- US-03: Manually requeue an issue after recovery fails or execution is interrupted.
+- US-07: Manually requeue after failed or interrupted work.
 
-### US-03: Manually requeue a failed or interrupted issue
+### US-07: Manually requeue Docker-enabled work
 Primary actor: Operator
 
 Trigger: The operator reapplies `agent:implement` after failure or interruption.
 
-Happy-path action: Request a fresh attempt after any required remote branch cleanup.
+Happy-path action: Request a fresh attempt after inspecting diagnostics and resolving any blocking remote branch.
 
-Visible outcome: A new issue run produces a validated draft PR without resuming the earlier agent session.
+Visible outcome: A new issue run produces a verified draft PR without resuming earlier work or deleting earlier diagnostics.
 
 Authoritative state transition: Failed or interrupted issue awaiting manual requeue → GitHub-recorded successful fresh issue run linked to a draft PR.
 
-Slice boundary: One operator-initiated retry-to-PR outcome using the existing polling and execution path. Include an end-to-end requeue demonstration and automated checks that restarting the runner alone does not resume interrupted work.
+Slice boundary: One explicit retry-to-PR outcome through the same Docker-enabled execution and publication path. Include restart inactivity, resource isolation between runs, and preservation of the earlier failed workspace/logs.
 
 Acceptance criteria:
-- Failure, interruption, and runner restart do not automatically requeue the issue; explicit label reapplication is required.
-- Requeue uses a new title/body snapshot and a fresh workspace from the current default branch. Do not resume the previous agent session or use its workspace as the new baseline.
-- Apply US-01 duplicate and branch checks again, removing `agent:implement` when skipping. Preserve a matching open PR and return its link instead of executing. An existing remote branch without an open PR blocks execution until the operator deletes it and reapplies the label, including after a closed PR or an interrupted push/PR-creation step.
-- A genuinely new issue run receives its own 15-minute deadline and up to three repair attempts, with all US-01 and US-02 safety, verification, reporting, and publication rules preserved.
-- Previous failed-run artifacts remain local until operator deletion; requeue does not require a database or erase those artifacts.
+- Failure, interruption, and restart do not automatically restore the trigger, resume a session, or interpret retained diagnostics as work to execute. Hard-crash resource inspection/cleanup remains manual.
+- Repeat US-05 exact PR/branch checks. Preserve and link matching open PRs; a factory branch without an open PR blocks execution even after a closed PR or uncertain publication. A skip consumes the trigger and requires explicit label reapplication after operator cleanup.
+- A clear requeue takes a fresh title/body snapshot and current default-branch workspace, with a new run identity, 900-second deadline, and up to three verification repairs. Never reuse the failed workspace/session as the baseline.
+- Preserve previous failed artifacts and unrelated Docker resources. Apply all US-05/US-06 architecture, setup ordering, credential, ownership, cleanup, verification, and publication requirements.
+- A focused test interrupts a run, confirms restart alone performs no work, reapplies the label with edited issue content, and reaches a draft PR through fresh Docker execution. Verify old diagnostics remain unchanged and new cleanup cannot remove another run's resources. Scripted external boundaries do not establish live Copilot/GitHub acceptance.
 
 Deferred follow-ups:
 - None.
 
 ## Open Questions
-- None. All explicit stories are demonstrated: US-01's first-pass issue-to-draft-PR flow, US-02's bounded verification-repair recovery, and US-03's successful fresh manual requeue after interruption, including restart inactivity. No explicit next story remains. Automatic credential renewal is still unproven by the completed short runs; the factory must not silently switch providers if authentication fails.
+- None requiring product policy. Local provider feasibility and exact tested image/tool pins remain implementation and verification work, not proven acceptance. If validation contradicts these decisions, return to the operator rather than silently changing scope or guarantees.
