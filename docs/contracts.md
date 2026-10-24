@@ -141,11 +141,14 @@ and at most three verification repairs after initial implementation.
     a C/C++ build toolchain, curl, CA certificates, tar, unzip, and standard Linux
     utilities. No credentials in image layers. Exact tested pins and build
     instructions belong with the factory-maintained build definition.
-  - Agent container: root execution, access to the existing local Docker engine,
-    the run workspace mounted at its same absolute host/container path, and the
-    repository root as the working directory. No target-specific factory Compose
-    definition or image is required. Host-operator readability/writability of
-    workspace files must survive success and failure.
+  - Agent container: start with the host UID/GID, access to the existing local
+    Docker engine, the run workspace mounted at its same absolute host/container
+    path, and the repository root as working directory. Setup, Pi, and verification
+    run as that user with writable container-local home/caches. Explicit system
+    installs use passwordless `sudo -n` from the pinned image snapshot; no automatic
+    root fallback. Trusted root initialization configures only container identity,
+    home, and socket-group access, never workspace permissions. No target-specific
+    factory Compose definition/image is required. Host UID 0 still means root.
   - Supported engine: local Linux-container engine running native ARM64,
     including an Apple Silicon Mac's Docker Desktop/Rancher Desktop provider.
     No remote engine, additional factory-managed VM, or factory-selected emulation
@@ -205,8 +208,10 @@ and at most three verification repairs after initial implementation.
   | Nonzero exit, signal, missing entrypoint, or invalid execution result | That command did not succeed. |
   | Completed verification's stdout/stderr | Private repair feedback, redacted for known credentials. |
 
-  Both entrypoints must be executable before implementation. Commands run from
-  the repository root inside the agent environment. Additional runtimes/browser
+  Both entrypoints must be executable before implementation. Commands run as the
+  host UID/GID from the repository root inside the agent environment. Target setup
+  explicitly uses `sudo -n` for system installs, not whole scripts or workspace
+  builds; permission errors never trigger automatic elevation. Additional runtimes/browser
   binaries belong in target setup; there is no pre-setup Pi bootstrap or guessed
   replacement command. Preserve explicit verification-result handling so Docker
   execution errors are not mistaken for completed repository check failures.
@@ -250,7 +255,9 @@ and at most three verification repairs after initial implementation.
   - Result: the actual created PR URL, not a guessed location.
 - Ordering / Idempotency expectations: Stop all known run-owned services/processes
   that can mutate the workspace and complete cleanup before reading changes for
-  host commit/publication. Commit, atomically create the absent remote branch,
+  host commit/publication. Confirm required host traversal/read access without
+  changing workspace modes/ownership; trusted staging/read failures block publication.
+  Commit, atomically create the absent remote branch,
   create the draft PR, then record success with its URL. Preserve the empty
   expected-ref lease (`--force-with-lease=refs/heads/factory/issue-<number>:`)
   so even a fast-forward update of an existing branch is rejected. Do not overwrite
@@ -341,7 +348,12 @@ and at most three verification repairs after initial implementation.
   the deletion scope. Required cleanup must finish before host publication and
   is attempted with bounded execution on success, setup failure, verification
   failure/exhaustion, partial startup, deadline expiry, and operator interruption.
-  Workspace files must remain readable/writable by the host operator afterward.
+  Do not recursively change workspace ownership/permissions. After cleanup,
+  inaccessible files/directories required for trusted host publication block
+  publication; ignored caches need not be writable. Retain private host-owned logs
+  and the unchanged workspace. Deliberately restricted files may need manual
+  operator inspection. Service-private data should use disposable owned volumes;
+  workspace-writing services need compatible UID/GID and permissions.
 - Visibility / Security: Match exact ownership labels or recorded engine identity,
   never broad name prefixes or merely unused state. Delete only known owned
   disposable resources; preserve external/shared resources, unrelated containers,

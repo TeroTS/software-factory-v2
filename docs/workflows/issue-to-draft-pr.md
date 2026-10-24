@@ -8,7 +8,8 @@
    `artifacts_dir`, outside the target workspace. Legacy Compose fields fail with
    migration guidance; relative artifacts resolve against the TOML directory.
 3. Startup validates artifacts, host tools/authentication, local engine/image
-   compatibility, and actual root/tool execution, pinning an immutable image ID.
+   compatibility, and actual host-user/tool execution with writable home/caches
+   and explicit `sudo -n`, pinning an immutable image ID.
    The runner never builds/pulls the shared image or uses an emulation fallback.
 4. A uniquely named startup probe has no mounts/network/credentials. Bounded cleanup
    is attempted on failure/stop; cleanup errors block startup. Previous artifacts
@@ -27,12 +28,15 @@ before starting/upgrading**: already-labeled issues are eligible for execution.
    and an immutable title/body snapshot from the current default branch. Comments,
    attachments, linked content, and later issue edits are not task inputs. Start
    one original 900-second budget before workspace preparation.
-3. Start one root shared-image agent with same-path workspace and local engine
-   socket access. The host retains trusted Git metadata outside the ordinary mount.
+3. Start one shared-image agent as the host UID/GID with same-path workspace,
+   writable container-local home/caches, and local engine socket access. Fixed
+   trusted isolated root code configures only container account/home/socket groups. The host retains trusted Git metadata outside the ordinary mount.
    Normal environment/mounts exclude GitHub publication credentials and broader host
    Pi settings; root/engine access can still bypass that separation.
 4. Require executable deterministic `./scripts/setup` and `./scripts/verify`.
-   Setup runs before Pi and installs nonbaseline tools inside the agent. Missing
+   Setup runs before Pi and installs nonbaseline tools inside the agent, using
+   explicit `sudo -n` for system installs and ordinary user commands for project
+   dependencies/builds. Permission errors never trigger automatic root retries. Missing
    entrypoints or setup failure ends the run without guessed commands/setup repair.
 5. Invoke exact-model Copilot Pi through the private stdin bridge with validated
    bearer endpoint/lifetime, temporary config, disabled discovered resources, and
@@ -43,8 +47,9 @@ before starting/upgrading**: already-labeled issues are eligible for execution.
    No verification repair loop is included in US-05.
 7. Remove the agent, then exact run-owned containers before owned networks and
    disposable volumes. Cleanup uses host-owned identity/exact labels, not mutable
-   Compose teardown files. Restore host file ownership/access with a trusted,
-   mount-only, network-free helper. Cleanup failure blocks publication.
+   Compose teardown files. Never recursively change workspace ownership/modes.
+   Check required host publication access; cleanup/access failure blocks publication.
+   Ignored caches need not be writable; inaccessible retained files require inspection.
 8. With passing verification, completed cleanup, time remaining, and nonempty
    changes, trusted host Git commits and creates the absent remote factory branch.
    Create a draft PR containing `Closes #N`, then comment with its actual URL.
@@ -65,6 +70,8 @@ require operator inspection, not pruning or automatic recovery.
 
 - Ordinary Compose inherits unique matching `FACTORY_RUN_ID`/`COMPOSE_PROJECT_NAME`.
 - Direct resources use `--label "software-factory.run-id=$FACTORY_RUN_ID"`.
+- Service-private data uses disposable owned volumes; services writing workspace
+  binds need compatible UID/GID and permissions. Cleanup does not repair files.
 - Preserve unrelated/external/shared resources, images, and build cache. Overrides,
   other contexts, and unlabeled commands can bypass cooperative cleanup.
 - Target scripts must use native-compatible `linux/arm64` images/tools. Startup

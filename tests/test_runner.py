@@ -188,6 +188,16 @@ def test_uncertain_push_is_observed_not_repeated(runtime, failure) -> None:
     assert "private diagnostics write failed" not in github.comment.call_args.args[1]
 
 
+def test_cleanup_failure_preserves_original_safe_execution_error(runtime) -> None:
+    runner, github, repo, sandbox, _ = runtime
+    sandbox.setup.side_effect = FactoryError("setup failed")
+    sandbox.stop.side_effect = FactoryError("cleanup failed")
+    runner.poll_once()
+    assert "setup failed" in github.comment.call_args.args[1]
+    assert "run cleanup failed" in github.comment.call_args.args[1]
+    repo.commit.assert_not_called()
+
+
 def test_uncertain_pr_reports_observed_link_without_success(runtime) -> None:
     runner, github, _, _, _ = runtime
     github.publish.side_effect = FactoryError("PR creation failed")

@@ -21,13 +21,21 @@ pytestmark = [
 ]
 
 
-@pytest.mark.parametrize("outcome", ["success", "interruption"])
+@pytest.mark.parametrize("outcome", ["success", "interruption", "inaccessible-file", "inaccessible-directory"])
 def test_operator_labels_issue_and_observes_real_cli_docker_outcome(tmp_path: Path, outcome: str) -> None:
     source = tmp_path / "source"
     target_repository(source)
     if outcome == "interruption":
         setup = source / "scripts/setup"
         setup.write_text(setup.read_text() + "touch setup-ready\nsleep 60\ntouch too-late\n")
+    elif outcome.startswith("inaccessible"):
+        verify = source / "scripts/verify"
+        command = (
+            "sudo -n install -m 000 /dev/null inaccessible\n"
+            if outcome == "inaccessible-file"
+            else "mkdir inaccessible\nprintf required > inaccessible/required\nchmod 000 inaccessible\n"
+        )
+        verify.write_text(verify.read_text() + command)
     real_git = shutil.which("git")
     subprocess.run([real_git, "init", "-b", "main", str(source)], check=True, capture_output=True)
     for key, value in [("user.name", "Fixture"), ("user.email", "fixture@localhost")]:
@@ -143,7 +151,7 @@ print(json.dumps(result))
             else:
                 pytest.fail("CLI did not finish the fixture run: " + output.read_text())
         finally:
-            if process.poll() is None and outcome == "success":
+            if process.poll() is None and outcome != "interruption":
                 process.send_signal(signal.SIGTERM)
             try:
                 process.wait(timeout=30)
@@ -165,11 +173,30 @@ print(json.dumps(result))
         assert list(previous.parent.iterdir()) == [previous]
     else:
         assert state["pr"] is None
-        assert state["comments"][-1] == "Failed: operator interruption", (state, output.read_text())
+        if outcome == "interruption":
+            assert state["comments"][-1] == "Failed: operator interruption", (state, output.read_text())
+        else:
+            assert state["comments"][-1].startswith("Failed:"), (state, output.read_text())
+            assert "publication access" in state["comments"][-1] or "git add failed" in state["comments"][-1]
+            assert (
+                subprocess.run(
+                    [real_git, "--git-dir=" + str(remote), "rev-parse", "--verify", "factory/issue-1"],
+                    capture_output=True,
+                ).returncode
+                != 0
+            )
         directory = next(p for p in previous.parent.iterdir() if p != previous)
         assert directory.stat().st_mode & 0o777 == 0o700
         assert (directory / "run.log").stat().st_mode & 0o777 == 0o600
         assert not (directory / "workspace/too-late").exists()
+        if outcome.startswith("inaccessible"):
+            restricted = directory / "workspace/inaccessible"
+            assert restricted.stat().st_mode & 0o777 == 0
+            # Dispose only this test fixture after asserting unchanged retained permissions.
+            if restricted.is_dir():
+                restricted.chmod(0o700)
+            else:
+                restricted.unlink()
     project = re.search(r"run identity (factory-[a-f0-9]{32})", output.read_text())[1]
     for kind in ("container", "network", "volume"):
         for label in ("software-factory.run-id", "com.docker.compose.project"):

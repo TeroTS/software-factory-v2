@@ -2,6 +2,10 @@
 
 Status: done
 
+Current US-05 correction: host UID/GID execution with explicit `sudo -n` and no
+workspace permission repair supersedes the historical root/helper evidence below.
+See **Host-user correction evidence** for current verification.
+
 ## Slice Goal
 - Let the operator turn a labeled issue into a Docker-verified draft PR using the shared agent image and the target's ordinary application services.
 
@@ -25,7 +29,7 @@ Status: done
 ## Contract Inputs
 - `docs/contracts.md`, Contract 1: preserve validated four-field configuration, immutable session image resolution, local-engine requirements, and terminal exit semantics.
 - `docs/contracts.md`, Contract 2: exact PR/branch checks, confirmed trigger removal before execution/notification, running status, immutable title/body snapshot, and fresh discovered-default-branch workspace.
-- `docs/contracts.md`, Contract 3: one root shared-image agent container, same-path workspace mount, local engine access, native ARM64, exact-model Copilot invocation, stdin-only bearer delivery, and limited normal mounts/environment without host-isolation claims.
+- `docs/contracts.md`, Contract 3: one host-UID/GID shared-image agent, writable container home/caches, explicit `sudo -n` system installs, same-path workspace/socket access, native ARM64, exact-model stdin-only Copilot invocation, and limited normal inputs without isolation claims.
 - `docs/contracts.md`, Contract 4 first-pass portions: executable setup/verify entrypoints, setup → implementation → verification, explicit completed-verification results, and one original 900-second deadline including cleanup/publication. Verification recovery belongs to US-06.
 - `docs/contracts.md`, Contract 5: completed cleanup, remaining time, nonempty diff, trusted host Git, create-only remote branch, draft PR identity, and inspection rather than retries after uncertain writes.
 - `docs/contracts.md`, Contract 6 current-run portions: concise running/skip/success/failure reporting, private diagnostics, preservation of previous artifacts, and no automatic trigger restoration or session recovery. The fresh manual-requeue demonstration belongs to US-07.
@@ -34,7 +38,7 @@ Status: done
 - No factory-owned HTTP API or `openapi.yaml` applies.
 
 ## Decision Inputs
-- None. SPEC and contracts contain the required accepted execution, ownership, and trust-boundary decisions.
+- `docs/plans/non-root-agent-workspace.md`: operator-approved host-user correction and `sudo -n` dependency/mechanism; corresponding DECISIONS/SPEC/contracts updated before production changes.
 
 ## Shared State Required Now
 - Existing validated configuration and `AgentRuntime` session image ID/local engine endpoint; no backend selector or new operator configuration.
@@ -56,7 +60,7 @@ Status: done
 ## Tests Required
 - Test-first first-pass orchestration: exact duplicate/branch skip handling, confirmed trigger removal, running status, immutable snapshot, fresh default-branch checkout, setup → Pi → verify → cleanup → commit/push/draft PR → actual-link reporting. A completed verification failure fails this slice's run without repair.
 - Explicit story E2E: an operator labels a fixture issue; run the real CLI/polling/orchestration path with scripted GitHub/authentication/Pi boundaries, real local Git and real ARM64 Docker build/ordinary Compose/services; observe a nonempty verified draft-PR request and success comment linking the scripted returned URL only after required cleanup. Assert the created branch content/identity using a local Git remote. No live GitHub or Copilot access.
-- Real Docker execution checks: socket access, same-absolute-path sibling relative bind mounts, target-specific setup installation, native target execution, explicit agent-to-service networking, and files remaining readable/writable by the host operator after success/failure.
+- Real Docker execution checks: socket access, same-path sibling binds, user-local tool installation, explicit root system installation, native target execution/networking, and host-owned ordinary output without permission repair. Inaccessible required publication files/directories must block publication and remain unchanged.
 - Desktop-provider evidence: prove same-path sharing, socket/file ownership, agent-to-service connectivity, and a macOS browser reaching a fixture application's published port on the actual local provider. Linux CI is not a substitute. Report feasibility contradictions rather than changing accepted guarantees.
 - Cleanup matrix: success, setup failure, first-pass verification failure, timeout, interruption, partial startup, and cleanup failure. Assert cleanup failure blocks publication, owned containers stop before networks/disposable volumes are removed, and cleanup does not execute mutable target teardown on the host.
 - Preserve an unrelated sentinel container/network/volume and earlier diagnostic artifacts; confirm exact ownership matching and no broad pruning, image/cache deletion, or deletion based only on disuse.
@@ -79,7 +83,11 @@ Status: done
 - One execution path remains, obsolete prepared-Compose helpers/callers/fixtures are removed or replaced, and current operator/architecture/workflow guidance accurately describes US-05 without claiming repair/requeue acceptance.
 - Focused story E2E, failure/boundary tests, real ARM64 Docker checks, format/lint, and unchanged Python/Node coverage gates pass; verification gaps are reported rather than marked complete.
 
-## Completion Summary
+## Historical Completion Summary
+
+The root agent and ownership-helper behavior in this historical delivery record
+is superseded by the host-user correction below; prior commands/counts are not
+current verification.
 - A labeled issue now takes the real serial first-pass execution path: exact PR/branch checks, confirmed trigger removal, running status, immutable snapshot/default-branch checkout, setup → exact-model Pi → canonical verification, required cleanup, trusted create-only host publication, and actual draft-PR link reporting. Already-labeled issues are eligible; the temporary guard is removed. A completed verification failure is terminal until US-06.
 - Each run uses the immutable startup image ID, one root agent, a same-absolute-path workspace mount, and the resolved local engine. On macOS the engine-side socket is `/var/run/docker.sock`, not the host provider proxy. Normal inputs exclude host Git metadata/publication credentials and broader Pi configuration. Copilot bearer remains stdin-only with endpoint/lifetime validation, temporary config, disabled discovered resources, and nonpersistent exact-model invocation.
 - Unique run identity and matching Compose/direct labels scope host-controlled cleanup independently of mutable target teardown files. The agent stops first, then owned containers, networks, and disposable volumes; a fixed network-free mount-only helper restores host file ownership/access. Cleanup failures block publication. Cleanup does not depend on writable diagnostic storage, and the safe run identity/location is reported locally. The original 900-second deadline is never reset; cleanup and status-only failure/uncertainty inspection have separate bounded budgets, not extra implementation/publication time.
@@ -94,12 +102,62 @@ Status: done
 - Wrapper-removal verification (historical): `UV_NATIVE_TLS=true FACTORY_DOCKER_TESTS=1 FACTORY_AGENT_IMAGE_TESTS=1 ./scripts/verify` passed. Ruff format/lint clean; **235 Python tests passed, zero skipped**; Python overall line/branch coverage **98.77%**; Node bridge line/branch/function coverage **100%**. This supersedes the earlier 267-test/98.22% record: the 32 removed cases tested only the deleted wrapper, and coverage increased with that source removed. All 80% gates and exclusions remain unchanged. `UV_NATIVE_TLS=true` uses the system trust store for the previously observed uv certificate issue; certificate verification is not disabled and dependencies are unchanged. No emulated workload, daemon/binfmt change, or replacement interception was introduced.
 - Packaging build, wheel resource checks, CLI help without polling, `git diff --check`, and local documentation link/format checks passed. No standalone type checker/Markdown linter is configured. No live Copilot/GitHub-writing check, remote CI run, commit, or push of this repository was performed. The unrelated untracked workflow document remains untouched. Docker access still grants effective engine/host control; unknown resources/hard-crash leftovers require operator inspection.
 
-## Review Follow-up
+## Historical Review Follow-up
 - Fixed ownership restoration after network/volume discovery or removal errors: once the agent and known owned containers are confirmed stopped, the trusted helper still attempts file-access restoration under the same bounded cleanup budget. Container removal/discovery uncertainty still skips restoration; every cleanup error still blocks publication and retains diagnostics.
 - Test-first evidence: four unit cases and the real Docker network-in-use case failed before the fix. The real case now confirms a mode-000 diagnostic becomes host-readable/writable with the operator's UID/GID while the unrelated network user is preserved and cleanup still reports failure. Unit cases cover agent/container cleanup uncertainty and network/volume discovery/removal failures.
 - Added existing-but-nonexecutable setup/verify cases alongside missing entrypoints; all four cases fail before setup executes. Extracted the shared private Copilot bearer command, preserving caller budgets, trusted working directories, flags, endpoint validation, and secret handling. Startup and issue-run regressions cover both callers.
-- Current full verification: `UV_NATIVE_TLS=true FACTORY_DOCKER_TESTS=1 FACTORY_AGENT_IMAGE_TESTS=1 ./scripts/verify` passed format → lint → coverage with **241 Python tests passed, zero skipped**, Python overall line/branch coverage **98.79%** (up from 98.77%), and Node bridge line/branch/function coverage **100%**. All 80% gates and exclusions remain unchanged. Earlier test counts above are historical; this is the current result.
+- Historical follow-up verification: `UV_NATIVE_TLS=true FACTORY_DOCKER_TESTS=1 FACTORY_AGENT_IMAGE_TESTS=1 ./scripts/verify` passed with **241 Python tests**, Python overall line/branch coverage **98.79%**, and Node bridge coverage **100%**. Superseded by the host-user correction evidence below.
 - Focused verification passed: `UV_NATIVE_TLS=true FACTORY_DOCKER_TESTS=1 uv run --frozen pytest tests/test_sandbox.py tests/test_docker_integration.py tests/test_runner.py -q` (**73 passed**), plus the startup/issue-run authentication assertions (**2 passed**) before extraction. Full verification then covered the extracted helper and real CLI E2E. No live authenticated service request or shared-image rebuild was needed.
+
+## Host-user correction evidence
+
+- Implemented the simplified plan in `docs/plans/non-root-agent-workspace.md`:
+  container starts with host UID/GID; ordinary setup/Pi/verify use that identity;
+  writable HOME/XDG caches/npm prefix remain container-local. Explicit `sudo -n`
+  uses the approved sudo package from the existing signed Debian snapshot.
+- Fixed isolated root Python initializes only container passwd/shadow/group entries
+  and the new empty home, including actual daemon-side socket group membership.
+  It never traverses the workspace. A real regression proved workspace `uuid.py`
+  was imported without Python isolation; `python -I` fixes that. UID-only exec
+  resolves primary/supplementary groups; an explicit UID:GID exec loses the socket
+  membership. Existing/new UID/GID cases and UID 0 are tested without new restrictions.
+- Removed `restore_ownership()` and its helper/budget entirely. Scoped cleanup
+  preserves workspace modes/ownership and Git executable-bit diff. A network-in-use
+  failure now preserves mode-000 output rather than repairing it. Host publication
+  fails on inaccessible required files/directories; ignored caches need not be
+  writable. Private host-owned logs remain available; failed workspaces are not
+  silently normalized. Cleanup failure retains the original safe execution error.
+- Test-first evidence: **12 focused failures** reproduced root execution/helper
+  behavior and silent omission of inaccessible directories; further regressions
+  reproduced missing sudo, absent shadow-account validation, unsafe workspace
+  Python imports, and loss of original failure context. These now pass. Real CLI
+  cases cover success, SIGTERM, root-created inaccessible output, and inaccessible
+  required directories, with no remote branch/PR after access failure.
+- Image build passed: `docker build --platform linux/arm64 -t software-factory-agent:1.0.0 agent`.
+  An initial cache-invalidating build failed on local PyPI certificate validation;
+  keeping the unchanged baseline layer and installing sudo in a separate pinned-
+  snapshot layer reused that baseline and built successfully. No trust bypass,
+  dependency upgrade, automatic runner build, or image-version policy was added.
+  Resolved image: `sha256:474b5cd83a6484ffa3f60e5ced67f062263ef4d9fe1dcff3b8a70ee0af76e4aa`,
+  native linux/arm64.
+- Actual Apple Silicon Rancher Desktop evidence: direct engine/socket access,
+  same-path sibling mounts, ordinary builds/Compose/service-backed checks,
+  user-local npm tooling, writable home/caches, explicit root system installation,
+  unchanged cleanup metadata, host-usable ordinary success/failure output, scoped
+  failure/timeout/interruption cleanup, and sentinel preservation all pass.
+- Current full verification:
+  `UV_NATIVE_TLS=true FACTORY_DOCKER_TESTS=1 FACTORY_AGENT_IMAGE_TESTS=1 ./scripts/verify`
+  passed format → lint → coverage: **258 Python tests passed, zero skipped**;
+  Python overall line/branch coverage **98.93%** (up from 98.79%); Node bridge
+  line/branch/function coverage **100%**. All 80% gates/exclusions are unchanged.
+- `UV_NATIVE_TLS=true uv build --offline` built the sdist/wheel; wheel checks confirm
+  the bridge/configuration code is present and the ownership helper is absent.
+  CLI help without polling, `git diff --check`, Markdown whitespace/fence checks,
+  and **67 local links/anchors** across the changed docs passed.
+- Native Linux CI was not run locally; the existing ARM64 workflow builds the image
+  and runs these same Docker suites. No new browser check or live authenticated
+  Copilot/GitHub request was performed; earlier browser evidence remains historical.
+  No commit/push or changes to the unrelated workflow document were made.
 
 ## Next Slice Recommendation
 - `US-06 Recover a Docker-enabled verification failure`: add bounded repair-and-verify recovery in the same agent environment/workspace under the original deadline, preserving all US-05 cleanup/publication gates. Keep `US-07 Manually requeue Docker-enabled work` in view for fresh-run identity/input/diagnostic invariants, without including its full outcome in the recovery slice.

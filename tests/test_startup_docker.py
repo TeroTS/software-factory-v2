@@ -26,7 +26,6 @@ pytestmark = [
 def test_shared_image_has_pinned_native_baseline_and_no_credentials() -> None:
     inspected = json.loads(subprocess.check_output(["docker", "image", "inspect", IMAGE], text=True))[0]
     assert inspected["Os"] == "linux" and inspected["Architecture"] == "arm64"
-    assert inspected["Config"]["User"] in {"", "0", "root"}
     assert not inspected["Config"].get("Volumes")
     assert not any(variable.startswith("UV_PYTHON_DOWNLOADS=") for variable in inspected["Config"]["Env"])
     assert not any(
@@ -35,7 +34,6 @@ def test_shared_image_has_pinned_native_baseline_and_no_credentials() -> None:
         for key in ("TOKEN", "SECRET", "CREDENTIAL", "PASSWORD")
     )
     script = """set -eu
-    test "$(id -u)" = 0
     test "$(uname -m)" = aarch64
     test "$(node --version)" = v22.19.0
     test "$(npm --version)" = 10.9.3
@@ -44,6 +42,7 @@ def test_shared_image_has_pinned_native_baseline_and_no_credentials() -> None:
     test "$(pi --version)" = 1.3.0
     docker --version | grep '28.4.0'
     docker compose version | grep 'v2.39.4'
+    sudo --version >/dev/null
     for tool in bash git make cc c++ curl tar; do "$tool" --version >/dev/null; done
     unzip -v >/dev/null
     test -s /etc/ssl/certs/ca-certificates.crt
@@ -73,7 +72,7 @@ def test_shared_image_has_pinned_native_baseline_and_no_credentials() -> None:
     )
 
 
-@pytest.mark.parametrize("tool", ["npm", "bash", "git", "make", "cc", "c++", "curl", "tar", "unzip"])
+@pytest.mark.parametrize("tool", ["npm", "bash", "git", "make", "cc", "c++", "curl", "tar", "unzip", "sudo"])
 def test_startup_rejects_broken_required_tool_and_removes_probe(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, tool: str
 ) -> None:
@@ -101,7 +100,7 @@ def test_startup_rejects_broken_required_tool_and_removes_probe(
     config = Config("owner/repo", "chosen", IMAGE, tmp_path / "artifacts")
     with pytest.raises(FactoryError, match="agent runtime check failed"):
         preflight(config)
-    runtime = next(args for args, phase in calls if phase == "agent runtime")
+    runtime = next(args for args, phase in calls if phase == "startup agent")
     name = runtime[runtime.index("--name") + 1]
     assert calls[-1] == (["docker", "rm", "--force", "--volumes", name], "startup cleanup")
     containers = subprocess.check_output(["docker", "ps", "-aq", "--filter", f"name=^{name}$"], text=True)

@@ -19,6 +19,63 @@ PI_FLAGS = [
 ]
 RUN_LABEL = "software-factory.run-id"
 
+# Configure only disposable container account/home/group files; never inspect or repair the workspace.
+USER_SETUP = """import os, sys, time, uuid
+from pathlib import Path
+uid, gid = map(int, sys.argv[1:])
+home = Path('/tmp/factory-home')
+home.mkdir(mode=0o700)
+os.chown(home, uid, gid)
+passwd = Path('/etc/passwd')
+users = [line.split(':') for line in passwd.read_text().splitlines()]
+user = next((entry for entry in users if int(entry[2]) == uid), None)
+if user is None:
+    user = ['f' + uuid.uuid4().hex[:16], 'x', str(uid), str(gid), '', str(home), '/bin/sh']
+    users.append(user)
+user[3], user[5] = str(gid), str(home)
+passwd.write_text(''.join(':'.join(entry) + '\\n' for entry in users))
+shadow = Path('/etc/shadow')
+if not any(line.split(':')[0] == user[0] for line in shadow.read_text().splitlines()):
+    with shadow.open('a') as stream:
+        stream.write(f'{user[0]}:!:{int(time.time() // 86400)}:0:99999:7:::\\n')
+group = Path('/etc/group')
+groups = [line.split(':') for line in group.read_text().splitlines()]
+socket = Path('/var/run/docker.sock')
+gids = {gid}
+if socket.exists():
+    gids.add(socket.stat().st_gid)
+for number in gids:
+    entry = next((entry for entry in groups if int(entry[2]) == number), None)
+    if entry is None:
+        entry = ['f' + uuid.uuid4().hex[:16], 'x', str(number), '']
+        groups.append(entry)
+    members = set(filter(None, entry[3].split(',')))
+    members.add(user[0])
+    entry[3] = ','.join(sorted(members))
+group.write_text(''.join(':'.join(entry) + '\\n' for entry in groups))
+"""
+
+
+# Initialize the container's numeric run user and socket groups with fixed root code, before any target command.
+def configure_user(name: str, commands: Commands, env: dict[str, str]) -> None:
+    commands.run(
+        [
+            "docker",
+            "exec",
+            "--user",
+            "0:0",
+            name,
+            "/usr/local/bin/python",
+            "-I",
+            "-c",
+            USER_SETUP,
+            str(os.getuid()),
+            str(os.getgid()),
+        ],
+        "agent user configuration",
+        env=env,
+    )
+
 
 # Validate bearer metadata without exposing it; accept supported Copilot endpoints with ≥20-minute lifetime.
 def copilot_endpoint(bearer: str) -> str:
@@ -41,7 +98,7 @@ class VerificationFailed(FactoryError):
         self.output = output
 
 
-# Own one fresh root agent and exact resource identity; Docker access is not a host-security boundary.
+# Own one host-user agent and exact resource identity; Docker access/elevation are not a host-security boundary.
 class Sandbox:
     # Keep cleanup identity and engine selection on the host, outside the ordinary same-path workspace mount.
     def __init__(self, image_id: str, docker_host: str, directory: Path, commands: Commands) -> None:
@@ -55,9 +112,10 @@ class Sandbox:
         self.env["DOCKER_HOST"] = docker_host
         # Desktop's host socket is a proxy, not a bindable path in the Linux daemon's filesystem.
         self.socket_path = "/var/run/docker.sock" if sys.platform == "darwin" else docker_host[7:]
-        self.base = ["docker", "exec", "-i", self.project]
+        # UID-only exec resolves primary and supplementary socket groups from the configured container account.
+        self.base = ["docker", "exec", "--user", str(os.getuid()), "-i", self.project]
 
-    # Start the pinned native image with root, a same-path bind, and the resolved local Unix engine socket.
+    # Start as the host UID/GID, then configure container-only home/account/socket access with fixed trusted code.
     def start(self) -> None:
         self.commands.run(
             [
@@ -70,7 +128,7 @@ class Sandbox:
                 "--platform",
                 "linux/arm64",
                 "--user",
-                "0:0",
+                f"{os.getuid()}:{os.getgid()}",
                 "--init",
                 "--label",
                 f"{RUN_LABEL}={self.project}",
@@ -85,6 +143,14 @@ class Sandbox:
                 "--env",
                 "DOCKER_DEFAULT_PLATFORM=linux/arm64",
                 "--env",
+                "HOME=/tmp/factory-home",
+                "--env",
+                "XDG_CACHE_HOME=/tmp/factory-home/.cache",
+                "--env",
+                "NPM_CONFIG_PREFIX=/tmp/factory-home/.local",
+                "--env",
+                "PATH=/tmp/factory-home/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+                "--env",
                 f"FACTORY_RUN_ID={self.project}",
                 "--env",
                 f"COMPOSE_PROJECT_NAME={self.project}",
@@ -97,6 +163,7 @@ class Sandbox:
             cwd=self.directory,
             env=self.env,
         )
+        configure_user(self.project, self.commands, self.env)
 
     # Require both canonical executable entrypoints before setup; do not invent commands or repair setup failures.
     def setup(self) -> None:
@@ -181,73 +248,27 @@ class Sandbox:
             if remaining:
                 raise FactoryError("owned resource cleanup failed; inspect run identity " + self.project) from None
 
-    # Restore host-operator access after mutators stop, using fixed trusted code with no socket or credentials.
-    def restore_ownership(self, commands: Commands) -> None:
-        name = self.project + "-ownership"
-        try:
-            commands.run(
-                [
-                    "docker",
-                    "run",
-                    "--name",
-                    name,
-                    "--pull=never",
-                    "--platform",
-                    "linux/arm64",
-                    "--network",
-                    "none",
-                    "--user",
-                    "0:0",
-                    "--mount",
-                    f"type=bind,src={self.workspace},dst={self.workspace}",
-                    "--workdir",
-                    str(self.workspace),
-                    "--entrypoint",
-                    "sh",
-                    self.image_id,
-                    "-ec",
-                    'find . -xdev -exec chown -h "$1" {} +; find . -xdev ! -type l -exec chmod u+rwX {} +',
-                    "factory-ownership",
-                    f"{os.getuid()}:{os.getgid()}",
-                ],
-                "workspace ownership",
-                env=self.env,
-            )
-        finally:
-            cleanup = Commands(deadline=time.monotonic() + 10)
-            cleanup.secrets = self.commands.secrets.copy()
-            self.remove(cleanup, "container", name)
-
-    # Stop the agent first, then owned containers/networks/volumes, and restore files under a bounded cleanup budget.
+    # Stop the agent first, then owned containers/networks/volumes under a bounded budget without changing files.
     def stop(self) -> None:
         # Cleanup must still reach the engine when private diagnostic storage has failed.
         cleanup = Commands(deadline=time.monotonic() + 60)
         cleanup.secrets = self.commands.secrets.copy()
         failures = []
-        containers_stopped = True
         try:
             self.remove(cleanup, "container", self.project)
         except FactoryError as error:
             failures.append(error)
-            containers_stopped = False
         resources = {}
         for kind in ("container", "network", "volume"):
             try:
                 resources[kind] = self.owned(cleanup, kind)
             except FactoryError as error:
                 failures.append(error)
-                if kind == "container":
-                    containers_stopped = False
         for kind, identities in resources.items():
             for identity in sorted(identities):
                 try:
                     self.remove(cleanup, kind, identity)
                 except FactoryError as error:
                     failures.append(error)
-                    if kind == "container":
-                        containers_stopped = False
-        # Non-container cleanup errors must not leave retained diagnostics inaccessible once mutators are stopped.
-        if containers_stopped:
-            self.restore_ownership(cleanup)
         if failures:
             raise FactoryError("run cleanup failed; inspect run identity " + self.project)

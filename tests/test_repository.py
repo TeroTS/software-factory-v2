@@ -1,3 +1,4 @@
+import os
 import subprocess
 import time
 from pathlib import Path
@@ -134,6 +135,72 @@ def test_nested_git_metadata_is_rejected_before_host_staging(origin: Path, tmp_p
     nested.write_text("gitdir: /private/host/repository\n")
     with pytest.raises(FactoryError, match="nested Git metadata"):
         repo.commit(1)
+
+
+@pytest.mark.parametrize("mode", [0o000, 0o400])
+def test_inaccessible_required_directory_blocks_commit_without_repair(origin: Path, tmp_path: Path, mode: int) -> None:
+    from software_factory.process import Commands, FactoryError
+    from software_factory.repository import Repository
+
+    assert os.getuid() != 0, "run access regressions as a normal host user"
+    run = tmp_path / "run"
+    run.mkdir()
+    repo = Repository(run, Commands())
+    repo.checkout(str(origin), "main")
+    (repo.workspace / "hello.txt").write_text("changed\n")
+    private = repo.workspace / "private"
+    private.mkdir()
+    (private / "required.txt").write_text("must not be silently skipped")
+    private.chmod(mode)
+    try:
+        with pytest.raises(FactoryError, match="publication access"):
+            repo.commit(1)
+        assert private.stat().st_mode & 0o777 == mode
+        assert repo.git("rev-parse", "HEAD").strip() == git(origin, "rev-parse", "HEAD")
+    finally:
+        private.chmod(0o700)
+
+
+def test_ignored_inaccessible_cache_does_not_block_publication(origin: Path, tmp_path: Path) -> None:
+    from software_factory.process import Commands
+    from software_factory.repository import Repository
+
+    run = tmp_path / "run"
+    run.mkdir()
+    repo = Repository(run, Commands())
+    repo.checkout(str(origin), "main")
+    (repo.workspace / ".gitignore").write_text("cache/\n")
+    cache = repo.workspace / "cache"
+    cache.mkdir()
+    (cache / "unused").write_text("ignored")
+    cache.chmod(0o000)
+    try:
+        repo.commit(1)
+        assert cache.stat().st_mode & 0o777 == 0
+        assert repo.git("show", "HEAD:.gitignore").strip() == "cache/"
+    finally:
+        cache.chmod(0o700)
+
+
+def test_ignored_directory_with_tracked_content_is_not_skipped(origin: Path, tmp_path: Path) -> None:
+    from software_factory.process import Commands, FactoryError
+    from software_factory.repository import Repository
+
+    run = tmp_path / "run"
+    run.mkdir()
+    repo = Repository(run, Commands())
+    repo.checkout(str(origin), "main")
+    folder = repo.workspace / "tracked"
+    folder.mkdir()
+    (folder / "source").write_text("tracked content")
+    repo.commit(1)
+    (repo.workspace / ".gitignore").write_text("tracked/\n")
+    folder.chmod(0o000)
+    try:
+        with pytest.raises(FactoryError, match="publication access"):
+            repo.commit(1)
+    finally:
+        folder.chmod(0o700)
 
 
 def test_missing_remote_ref_is_a_failure(origin: Path, tmp_path: Path) -> None:

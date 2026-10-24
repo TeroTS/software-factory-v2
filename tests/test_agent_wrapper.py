@@ -65,6 +65,10 @@ def test_agent_wrapper_uses_ephemeral_credentials_and_exact_model(tmp_path: Path
     assert "COMPOSE_PROJECT_NAME" in output["prompt"]
     assert "software-factory.run-id=$FACTORY_RUN_ID" in output["prompt"]
     assert "linux/arm64" in output["prompt"]
+    assert "current host-matched user" in output["prompt"]
+    assert "explicit sudo -n only for system installs" in output["prompt"]
+    assert "never retry permission errors automatically as root" in output["prompt"]
+    assert "Cleanup will not repair workspace ownership or permissions" in output["prompt"]
     if outcome == "repair":
         assert "Repair" in output["prompt"]
         assert payload["verification_output"] in output["prompt"]

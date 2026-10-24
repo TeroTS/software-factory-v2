@@ -63,12 +63,27 @@ class Repository:
 
     # Stage with trusted metadata and commit with the issue number in its message; return SHA or fail if unchanged.
     def commit(self, number: int) -> str:
+        ignored = {
+            self.workspace / name.rstrip("/")
+            for name in self.git("ls-files", "--others", "--ignored", "--exclude-standard", "--directory", "-z").split(
+                "\0"
+            )
+            if name.endswith("/")
+        }
+
+        # Fail closed on unreadable publication directories without exposing private paths or repairing permissions.
+        def inaccessible(error: OSError) -> None:
+            raise FactoryError("host publication access failed; inspect private workspace permissions") from None
+
         # shortcut: nested repositories are rejected; add safe gitlink handling when a target needs submodules.
-        for directory, dirs, files in os.walk(self.workspace, followlinks=False):
+        for directory, dirs, files in os.walk(self.workspace, followlinks=False, onerror=inaccessible):
+            if not os.access(directory, os.R_OK | os.X_OK):
+                inaccessible(PermissionError())
             if Path(directory) == self.workspace:
                 dirs[:] = [name for name in dirs if name.lower() != ".git"]
             elif any(name.lower() == ".git" for name in dirs + files):
                 raise FactoryError("nested Git metadata is not allowed during host publication")
+            dirs[:] = [name for name in dirs if Path(directory) / name not in ignored]
         self.git("add", "--all", "--", ".")
         if not self.git("diff", "--cached", "--name-only", "--no-ext-diff"):
             raise FactoryError("no changes produced")

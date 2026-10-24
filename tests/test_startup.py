@@ -1,4 +1,5 @@
 import json
+import os
 import time
 from pathlib import Path
 from unittest.mock import Mock
@@ -50,7 +51,7 @@ def test_startup_resolves_local_image_and_checks_execution_without_claims(startu
     assert "--volumes" in calls[-1].args[0], "remove any anonymous volumes declared by the trusted probe image"
     image_call = next(call for call in calls if call.args[1] == "agent image")
     assert image_call.args[0][-1] == config.agent_image
-    probe = next(call for call in calls if call.args[1] == "agent runtime")
+    probe = next(call for call in calls if call.args[1] == "startup agent")
     assert IMAGE_ID in probe.args[0]
     assert "--pull=never" in probe.args[0]
     assert "linux/arm64" in probe.args[0]
@@ -131,6 +132,8 @@ def test_malformed_or_incompatible_engine_and_image_fail_startup(startup, phase:
         "agent image",
         "GitHub authentication",
         "Copilot authentication",
+        "startup agent",
+        "agent user configuration",
         "agent runtime",
         "startup cleanup",
     ],
@@ -204,6 +207,16 @@ def test_artifact_probe_failure_is_safe(startup, monkeypatch) -> None:
     with pytest.raises(FactoryError, match="artifacts_dir") as failure:
         preflight(startup[0])
     assert "secret" not in str(failure.value)
+
+
+def test_startup_checks_tools_home_and_sudo_as_host_user(startup) -> None:
+    preflight(startup[0])
+    calls = startup[1].run.call_args_list
+    runtime = next(call.args[0] for call in calls if call.args[1] == "agent runtime")
+    assert runtime[:5] == ["docker", "exec", "--user", str(os.getuid()), "-i"]
+    assert "sudo -n" in runtime[-1]
+    assert 'test -w "$HOME"' in runtime[-1]
+    assert calls[-1].args[1] == "startup cleanup"
 
 
 def test_startup_preserves_previous_artifacts(startup) -> None:

@@ -80,7 +80,8 @@ This record supersedes the previous execution-model decisions. It consolidates `
 ### Operations / Deployment
 
 - Connect the agent to the existing local host Docker engine and mount the workspace at the same absolute host/container path.
-- Run the agent as root so setup can install system packages. Files must remain readable/writable by the host operator after success and failure.
+- Operator-approved US-05 correction: start the agent with the host UID/GID and run setup, Pi, and verification as that user, with writable container-local home/caches. Add `sudo` from the pinned image snapshot and support explicit `sudo -n` system installs; do not elevate whole phases or automatically retry permission failures as root. Fixed trusted root initialization may configure only the container account/home/socket-group access, not workspace permissions. Docker access/elevation remain effective root access, not isolation.
+- Remove recursive workspace ownership/permission restoration. Clean known owned resources before publication and fail visibly if the host cannot access required publication files. Preserve unchanged failed workspaces/private host-owned logs; deliberately inaccessible files require operator inspection. Do not require ignored caches to be writable or silently repair them. Matching host UID 0 remains root; no new root-runner rejection policy.
 - The image baseline includes Pi, Node.js/npm, Docker CLI/Compose, Python/uv, Bash, Git, Make, a C/C++ build toolchain, curl, CA certificates, tar, unzip, and standard Linux utilities. Pin the image's base and installed tool versions in its build definition.
 - Additional runtimes and browser binaries belong in target setup when required; do not introduce host-side tool installation or a new bootstrap phase.
 - Startup requires a compatible agent image already available locally and resolves it to an immutable image ID for the runner session. Missing/incompatible images fail startup; the runner does not build, pull, or fall back.
@@ -104,8 +105,8 @@ This record supersedes the previous execution-model decisions. It consolidates `
 3. Poll for `agent:implement`, applying the existing exact factory-PR/branch checks before execution.
 4. Remove the trigger before execution or skip notification. Preserve a matching open PR and return its link; an existing factory branch without an open PR requires operator cleanup and label reapplication.
 5. Claim a clear issue, record running status, snapshot its title/body, and create a fresh default-branch workspace and unique resource identity.
-6. Start the root agent container with the same-path workspace mount and local Docker access. Run setup, implementation, verification, and permitted repairs under the shared deadline.
-7. Clean owned resources, ensure host-usable workspace files, and publish passing nonempty changes through trusted host Git operations.
+6. Start the agent container with the host UID/GID, same-path workspace mount, writable container home/caches, and local Docker access. Run setup, implementation, verification, and permitted repairs as that user under the shared deadline; system installs explicitly use `sudo -n`.
+7. Clean owned resources, confirm host access required for publication without rewriting workspace ownership/modes, and publish passing nonempty changes through trusted host Git operations.
 8. Record success with the draft PR link, or a concise failure with private local diagnostics. Never post full transcripts or secrets.
 9. Failure, interruption, or restart never automatically requeues/resumes work. Explicit label reapplication starts a fresh snapshot/workspace, deadline, and repair allowance after duplicate checks.
 

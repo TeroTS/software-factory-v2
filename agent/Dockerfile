@@ -31,6 +31,14 @@ RUN printf '%s\n' \
     && npm install --global --ignore-scripts @earendil-works/pi-coding-agent@1.3.0 \
     && npm cache clean --force
 
+# Allow explicit noninteractive system installs; ordinary issue commands use the host UID/GID.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends sudo \
+    && printf '%s\n' 'Defaults always_set_home' 'ALL ALL=(root) NOPASSWD: ALL' > /etc/sudoers.d/factory \
+    && chmod 0440 /etc/sudoers.d/factory \
+    && visudo -cf /etc/sudoers.d/factory \
+    && rm -rf /var/lib/apt/lists/*
+
 ENV UV_LINK_MODE=copy
 WORKDIR /tmp
 USER root

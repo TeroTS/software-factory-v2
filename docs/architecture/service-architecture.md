@@ -8,8 +8,8 @@ accepted behavior; the [current slice](../slices/current-slice.md) records evide
 ## Current implementation: US-04 and US-05
 
 Startup validates four-field TOML, artifact-root usability, host authentication,
-local native ARM64 Docker, an already-local shared image, and native root/tool
-execution. It retains the immutable image ID and resolved engine endpoint, removes
+local native ARM64 Docker, an already-local shared image, and native host-user/tool
+execution with writable home/caches and explicit `sudo -n`. It retains the immutable image ID and resolved engine endpoint, removes
 the uniquely named mount/network/credential-free probe, and begins serial polling.
 The temporary pre-claim guard is removed; inspect existing trigger labels before
 starting this version.
@@ -23,12 +23,12 @@ flowchart LR
     RUN <--> GH[Host gh: coordination and draft PR]
     RUN --> GIT[Trusted host Git metadata]
     RUN --> ART[Private fresh workspace and logs]
-    RUN --> AGENT[Root shared-image agent]
+    RUN --> AGENT[Host UID/GID shared-image agent]
     ART -->|same-path workspace only| AGENT
     AGENT -->|engine socket| ENGINE
     ENGINE --> SERVICES[Ordinary target Compose and direct resources]
     AGENT --> WORK[Setup → Pi → verification]
-    RUN --> CLEAN[Host-owned scoped cleanup + file access restoration]
+    RUN --> CLEAN[Scoped cleanup + required host access check]
     CLEAN -->|required before publication| GIT
     GIT -->|create-only branch| GH
 ```
@@ -42,8 +42,10 @@ flowchart LR
    snapshot with the discovered default-branch base commit. One original 900-second
    deadline includes preparation, builds/installations, execution, required cleanup,
    and publication. There is no restart/resume state.
-3. Start one root agent from the immutable shared image with a same-absolute-path
-   workspace bind and local engine socket. On macOS the daemon socket mount is
+3. Start one agent as the host UID/GID from the immutable shared image with a
+   same-absolute-path workspace bind and local engine socket. Fixed isolated root
+   code configures only container account/home/socket groups, never workspace
+   permissions. Ordinary phases use that user; explicit system installs use `sudo -n`. On macOS the daemon socket mount is
    `/var/run/docker.sock`; the selected desktop host proxy is only for host commands.
    Normal inputs exclude trusted Git metadata and host publication credentials.
 4. Require executable setup/verify scripts, run setup, then exact-model Pi with a
@@ -59,9 +61,10 @@ flowchart LR
    factory never selects an emulation fallback or substitutes dependencies.
    Ownership conventions are cooperative, not access controls.
 6. Remove the agent first, independently discover exact owned resource identities,
-   remove owned containers before networks/disposable volumes, and restore host
-   file ownership/access with fixed trusted code in a network-free mount-only helper.
-   No target teardown code executes on the host. Cleanup failure blocks publication.
+   remove owned containers before networks/disposable volumes, and check required
+   host publication access without changing workspace ownership/modes. Ignored caches
+   need not be writable; deliberately restricted files require operator inspection.
+   No target teardown code executes on the host. Cleanup/access failure blocks publication.
 7. With passing verification, completed cleanup, remaining time, and nonempty changes,
    trusted host Git creates the absent branch and gh creates a draft PR containing
    `Closes #N`. Uncertain writes receive bounded read-only inspection, not retries.

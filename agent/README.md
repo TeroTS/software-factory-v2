@@ -35,15 +35,19 @@ configuration are copied into the image.
 | Bash | 5.2.15 |
 | Git | 2.39.5 |
 | Make | 4.3 |
+| sudo | 1.9.13p3 (Debian revision from the fixed snapshot) |
 | C/C++ compiler | GCC/G++ 12.2.0 |
 | curl | 7.88.1 |
 | tar / unzip | 1.34 / 6.00 |
 | CA certificates / Linux utilities | Fixed Debian snapshot and base manifest |
 
 The build includes `build-essential`, standard utilities, curl, certificates,
-tar, and unzip. Root execution allows target setup to install nonbaseline
-tools. Node/npm/npx, Python/uv, and Docker/Compose/buildx are on their standard
-paths. `UV_LINK_MODE=copy` avoids cross-filesystem link assumptions. The image
+tar, unzip, and sudo. The runner starts the container with the host UID/GID;
+setup, Pi, and verification run as that user. Explicit `sudo -n` commands install
+nonbaseline system tools without prompting. Elevation is not technically restricted
+to installs, and is not a security boundary. Do not run whole setup scripts or
+workspace builds as root or retry permission errors automatically with sudo.
+Node/npm/npx, Python/uv, and Docker/Compose/buildx are on their standard paths. `UV_LINK_MODE=copy` avoids cross-filesystem link assumptions. The image
 leaves uv's Python download policy at its default, so target setup can obtain
 another Python version when required.
 
@@ -54,6 +58,30 @@ Docker daemon, or target-specific dependencies in the image. Runtime engine acce
 grants effective engine/host control during issue execution; this image is not an isolation
 boundary.
 
+## Host-user execution and migration
+
+Rebuild the image explicitly and restart the runner for this change. Startup
+rejects images without working noninteractive sudo; no new image tag policy or
+automatic migration is introduced. Setup scripts that assumed root need adaptation:
+use `sudo -n apt-get ...` for OS packages and ordinary user commands for project
+installs/builds. The image installs sudo from the same signed Debian snapshot and
+sets passwordless root elevation with root HOME selection.
+
+The agent starts with the host numeric UID/GID. Fixed trusted isolated Python code
+initializes only disposable container account/shadow/group entries and
+`/tmp/factory-home`; it never traverses or repairs the workspace. This permits
+sudo with arbitrary numeric users, including existing account/group IDs. Target
+Docker exec uses UID-only selection to resolve the configured primary GID and
+actual engine-side socket supplementary group. The startup probe has no socket;
+per-run initialization resolves socket access on the real provider.
+
+HOME is `/tmp/factory-home`; XDG caches and npm's user-local global prefix live
+under it. The prefix's `bin` directory is on the target PATH. No host home/settings
+are mounted. Deliberately root-owned or mode-restricted workspace output is not
+repaired: inaccessible required publication files block publication. Service-private
+data should use disposable owned volumes, not workspace binds. Host UID 0 still
+runs as root; no new root-runner restriction is imposed.
+
 ## Verification boundary
 
 `tests/test_startup_docker.py` executes these native tool checks and the real
@@ -63,13 +91,15 @@ or credentials and is removed before polling. This is not acceptance of
 Docker-enabled issue execution by itself. The [Docker suite](../tests/test_docker_integration.py)
 and [CLI issue E2E](../tests/test_issue_docker.py) additionally use this image for
 real application builds, ordinary Compose services, same-path sibling mounts,
-socket access, a target-installed tool, host-usable files, and scoped cleanup.
+socket access, a target-installed tool, host-usable ordinary files without repair,
+and scoped cleanup.
 Pi/authentication/GitHub boundaries are scripted; no live provider request or
 GitHub write is made. Desktop browser evidence is recorded in the current slice,
 not inferred from Linux CI.
 
 New agents use the image's unmodified Docker executable directly; no runtime
-installation, executable relocation, or image rebuild is needed. Startup validates
+Docker-executable installation or relocation is needed. The host-user/sudo
+migration above does require an image rebuild. Startup validates
 the native engine/shared image. Factory-owned containers explicitly request
 `--platform linux/arm64` and `--pull=never`; target commands inherit
 `DOCKER_DEFAULT_PLATFORM=linux/arm64`. Target scripts must use native-compatible

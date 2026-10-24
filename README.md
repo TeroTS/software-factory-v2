@@ -129,7 +129,7 @@ are not a distributed lock.
 
    Startup checks artifact-root usability, host tools, local engine architecture,
    GitHub authentication, Copilot bearer endpoint/lifetime, local image architecture,
-   and actual native root/tool execution. The uniquely named startup probe has no
+   and actual native host-user/tool execution with writable home/caches and `sudo -n`. The uniquely named startup probe has no
    network, mounts, or credentials and receives bounded cleanup on failure/stop.
    Cleanup errors block startup; inspect named `factory-startup-*` leftovers only.
 
@@ -147,16 +147,16 @@ are not a distributed lock.
 
 5. A clear issue gets running status, an immutable title/body snapshot, a fresh
    default-branch workspace, and one original 900-second deadline. Setup → Pi →
-   verification run inside one fresh root agent. All work, including installations,
+   verification run as the host UID/GID inside one fresh agent. All work, including installations,
    builds, cleanup before publication, and publication, consumes that deadline.
    Missing entrypoints, setup/provider/lifecycle errors, or failed verification
    fail visibly without repair in this delivery.
 
-6. The runner removes the agent and known owned services/resources, restores
-   workspace ownership/access for the host operator using a mount-only helper,
-   then publishes only passing, nonempty changes with time remaining. Trusted
+6. The runner removes the agent and known owned services/resources, then confirms
+   host access required for publication without changing workspace ownership/modes.
+   It publishes only passing, nonempty changes with time remaining. Trusted
    host Git creates the absent factory branch, then a draft PR with `Closes #N`.
-   Cleanup failure blocks publication. Uncertain push/PR results receive bounded
+   Cleanup or required-access failure blocks publication. Uncertain push/PR results receive bounded
    read-only inspection rather than write retries. Status-reporting failures remain
    visible locally even if a branch/PR was already created.
 
@@ -174,7 +174,26 @@ nonbaseline tools/browser binaries **inside the agent**, not on the host. Both
 scripts must exist before implementation; there is no setup repair or Pi bootstrap.
 Do not reuse host macOS `.venv`/`node_modules` as Linux dependencies.
 
-The root agent mounts the workspace at its same absolute host/container path and
+Setup, Pi, and verification run as your numeric host UID/GID, with a writable
+container-local home, caches, and user-local tool path. Use explicit `sudo -n` for
+system installs, not whole setup scripts or project builds. Permission errors do
+not trigger automatic elevation. For example:
+
+```sh
+sudo -n apt-get update
+sudo -n apt-get install -y libpq-dev
+npm ci
+uv sync --frozen
+```
+
+**Upgrade:** explicitly rebuild the shared image and restart the runner. Older
+images without configured `sudo` fail startup. Adapt setup scripts that assumed
+root; global npm installs now use the user-local prefix. Fixed trusted root code
+initializes only the container account/home and socket groups, not the workspace.
+UID-only Docker exec resolves the configured primary/supplementary groups. Running
+the host runner as UID 0 still means root; UID matching is not a security boundary.
+
+The agent mounts the workspace at its same absolute host/container path and
 connects to the selected local engine. On macOS the engine-side socket mount is
 `/var/run/docker.sock`, not the host provider's proxy socket. On Linux it uses the
 resolved local socket path. Only the workspace and engine socket are ordinary
@@ -190,16 +209,18 @@ and use the image's unmodified Docker executable directly. The factory does not
 intercept Docker commands or guarantee rejection of explicit platform overrides,
 which may invoke emulation if the operator's engine supports it. Actual
 Docker/setup/verification failures remain visible; the factory never selects an
-emulation fallback or substitutes dependencies. No image rebuild is required for
-this removal; newly created agents use direct execution, while existing containers
-retain their current filesystem until removed.
+emulation fallback or substitutes dependencies. Existing containers retain their
+current filesystem until removed; the host-user/sudo change requires the explicit
+image rebuild and runner restart described above.
 
 Ordinary Compose commands inherit unique matching `FACTORY_RUN_ID` and
 `COMPOSE_PROJECT_NAME`. Direct container/network/disposable-volume creation must
 use `--label "software-factory.run-id=$FACTORY_RUN_ID"`. Keep these identities;
 explicit project overrides, unlabeled calls, and other contexts bypass cleanup.
 Avoid fixed container names/ports or adapt them for each run. External/shared
-resources, images, and build cache are not disposable run resources.
+resources, images, and build cache are not disposable run resources. Put
+service-private data in disposable owned volumes; services writing workspace binds
+must use compatible UID/GID and permissions.
 
 Select explicit service addresses: Compose DNS after joining the relevant network,
 or the Docker host address for published ports. Sibling services do not share the
@@ -218,10 +239,13 @@ Deleting artifacts does not stop leftover Docker resources.
 
 Cleanup uses exact `software-factory.run-id` or `com.docker.compose.project` labels
 and host-owned agent identity, never mutable target Compose teardown files. It
-removes owned containers before networks/disposable volumes, then uses a trusted
-mount-only, network-free helper to restore host ownership/access. Cleanup has a
-separate bounded budget after expiry/stop; this never extends coding/publication
-allowance. Untracked resources and hard-crash leftovers need operator inspection;
+removes owned containers before networks/disposable volumes. It never recursively
+changes workspace ownership or permissions. Required host publication access is
+checked after cleanup; inaccessible required files/directories block publication.
+Ignored caches need not be writable. Deliberately restricted retained files may
+need manual operator inspection; private host-owned run logs remain separate.
+Cleanup has a separate bounded budget after expiry/stop; this never extends
+coding/publication allowance. Untracked resources and hard-crash leftovers need operator inspection;
 never use daemon-wide pruning. Independent target CI and human review remain
 mandatory, even after passing local verification.
 

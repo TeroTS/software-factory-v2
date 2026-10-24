@@ -61,12 +61,11 @@ else:
     assert '--model' in sys.argv and sys.argv[sys.argv.index('--model')+1] == 'chosen'
     pathlib.Path('site/index.html').write_text('implemented\\n')
     pathlib.Path('private-file').write_text('host-writable\\n')
-    pathlib.Path('private-file').chmod(0o000)
 """
     (workspace / "fixture-pi").write_text(stub)
     for name, body in {
         "setup": "npm install --global --ignore-scripts ./fixture-tool\n"
-        "install -m 755 fixture-pi /usr/local/bin/pi\n"
+        'install -m 755 fixture-pi "$HOME/.local/bin/pi"\n'
         "docker compose up --build --detach --wait\n"
         'docker network connect "${COMPOSE_PROJECT_NAME}_default" "$FACTORY_RUN_ID"\n',
         "verify": 'test "$(factory-fixture-prerequisite)" = target-installed\n'

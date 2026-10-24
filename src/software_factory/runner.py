@@ -14,13 +14,17 @@ from software_factory.config import Config
 from software_factory.github import GitHub
 from software_factory.process import Commands, FactoryError
 from software_factory.repository import Repository
-from software_factory.sandbox import PI_FLAGS, Sandbox, copilot_endpoint
+from software_factory.sandbox import PI_FLAGS, Sandbox, configure_user, copilot_endpoint
 
 LOGGER = logging.getLogger("software_factory")
 
 # Smoke-run baseline tools without mounts, credentials, network access, or target repository commands.
 RUNTIME_CHECK = """set -eu
- test "$(id -u)" = 0
+ test "$(id -u)" = "$(stat -c %u "$HOME")"
+ test -w "$HOME"
+ mkdir -p "$XDG_CACHE_HOME"
+ test -w "$XDG_CACHE_HOME"
+ sudo -n true
  test "$(uname -m)" = aarch64
  for tool in pi node npm docker python uv bash git make cc c++ curl tar; do "$tool" --version >/dev/null; done
  unzip -v >/dev/null
@@ -128,26 +132,39 @@ def preflight(config: Config) -> AgentRuntime:
             [
                 "docker",
                 "run",
+                "--detach",
                 "--name",
                 name,
+                "--user",
+                f"{os.getuid()}:{os.getgid()}",
+                "--env",
+                "HOME=/tmp/factory-home",
+                "--env",
+                "XDG_CACHE_HOME=/tmp/factory-home/.cache",
                 "--pull=never",
                 "--platform",
                 "linux/arm64",
                 "--network",
                 "none",
                 "--entrypoint",
-                "sh",
+                "sleep",
                 image_id,
-                "-ec",
-                RUNTIME_CHECK,
+                "infinity",
             ],
+            "startup agent",
+            env=env,
+        )
+        configure_user(name, commands, env)
+        commands.run(
+            ["docker", "exec", "--user", str(os.getuid()), "-i", name, "sh", "-ec", RUNTIME_CHECK],
             "agent runtime",
             env=env,
         )
     except FactoryError:
         failed = True
         raise FactoryError(
-            "agent runtime check failed: rebuild the shared image with root and the documented native tools"
+            "agent runtime check failed: rebuild the shared image with sudo and the documented native tools; "
+            "check host-user execution and writable container home"
         ) from None
     except KeyboardInterrupt:
         failed = True
@@ -257,7 +274,8 @@ class Runner:
         except FactoryError, OSError:
             LOGGER.error("Run cleanup failed; inspect private diagnostics and run-owned resources: %s", directory)
             if not isinstance(failure, KeyboardInterrupt):
-                raise FactoryError("run cleanup failed; publication blocked") from None
+                reason = f"{failure}; " if isinstance(failure, FactoryError) else ""
+                raise FactoryError(reason + "run cleanup failed; publication blocked") from None
         if failure is not None:
             raise failure
         if commands.deadline is not None and time.monotonic() >= commands.deadline:

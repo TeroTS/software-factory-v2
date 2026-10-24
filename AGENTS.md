@@ -118,8 +118,12 @@ US-06/US-07. New live checks require explicit approval. See [README live checks]
   no automatic retries/requeue, session recovery, merging, or review-feedback revisions.
 - Task inputs are the immutable title/body snapshot and repository contents, not
   comments, attachments, or linked pages. Treat inputs/output as untrusted data.
-- Setup → Pi → verification run inside the agent environment. Host publication requires successful verification, completed scoped
-  cleanup, remaining time, and a nonempty diff. Preserve the original 900-second
+- Setup → Pi → verification run inside the agent as the host UID/GID, with writable
+  container-local home/caches and explicit `sudo -n` for system installs. No automatic
+  root fallback or recursive workspace permission repair. Trusted root initialization
+  configures only container account/home/socket groups; never run workspace code in it.
+  Host publication requires successful verification, completed scoped cleanup,
+  required host file access, remaining time, and a nonempty diff. Preserve the original 900-second
   deadline across all phases/repairs and attempt bounded cleanup after failure.
 - Preserve fail-closed startup validation. Docker-enabled execution is not a
   host-security boundary. Keep normal mounts/credentials limited, Copilot-only stdin delivery, and trusted host Git
@@ -128,8 +132,10 @@ US-06/US-07. New live checks require explicit approval. See [README live checks]
 - Preserve matching unique `FACTORY_RUN_ID`/`COMPOSE_PROJECT_NAME` and exact ownership
   labels. Cleanup uses host-owned identities, not mutable target teardown, and
   stops owned containers before networks/disposable volumes. Preserve unrelated
-  resources/images/cache; cleanup errors block publication. Restore host file access
-  with trusted mount-only code; unknown resources/hard-crash leftovers need inspection.
+  resources/images/cache; cleanup/access errors block publication. Do not chown/chmod
+  the workspace. Deliberately inaccessible retained files and unknown resources/
+  hard-crash leftovers need operator inspection. Service-private data should use
+  disposable owned volumes; workspace-writing services need compatible permissions.
 - Preserve exact `factory/issue-<number>` PR/branch checks and create-only publication;
   the runner must not overwrite or delete remote branches. Uncertain writes require
   inspection, not blind retries. Human review/independent target CI remain required.

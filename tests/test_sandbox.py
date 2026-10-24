@@ -1,4 +1,5 @@
 import json
+import os
 import time
 from pathlib import Path
 from unittest.mock import Mock
@@ -29,7 +30,7 @@ def test_shared_image_start_has_same_path_socket_and_cooperative_identity(sandbo
     args = start.args[0]
     assert IMAGE in args
     assert args[args.index("--platform") + 1] == "linux/arm64"
-    assert args[args.index("--user") + 1] == "0:0"
+    assert args[args.index("--user") + 1] == f"{os.getuid()}:{os.getgid()}"
     workspace = str(instance.directory / "workspace")
     assert f"type=bind,src={workspace},dst={workspace}" in args
     assert f"type=bind,src={instance.socket_path},dst=/var/run/docker.sock" in args
@@ -40,7 +41,13 @@ def test_shared_image_start_has_same_path_socket_and_cooperative_identity(sandbo
     assert "GH_TOKEN" not in start.kwargs["env"]
     assert "host-secret" not in " ".join(args)
     assert "--pull=never" in args
-    commands.run.assert_called_once()  # startup must not rewrite the image's Docker executable
+    assert len(commands.run.call_args_list) == 2
+    initialize = commands.run.call_args_list[1]
+    assert initialize.args[1] == "agent user configuration"
+    assert initialize.args[0][:5] == ["docker", "exec", "--user", "0:0", instance.project]
+    assert "HOME=/tmp/factory-home" in args
+    assert "XDG_CACHE_HOME=/tmp/factory-home/.cache" in args
+    assert instance.base == ["docker", "exec", "--user", str(os.getuid()), "-i", instance.project]
 
 
 @pytest.mark.parametrize("platform,expected", [("darwin", "/var/run/docker.sock"), ("linux", "/local/docker.sock")])
@@ -59,7 +66,7 @@ def test_setup_implementation_and_verification_stay_inside_agent(sandbox) -> Non
     calls = commands.run.call_args_list
     assert [call.args[1] for call in calls] == ["required entrypoints", "setup", "implementation", "verification"]
     for call in calls:
-        assert call.args[0][:4] == ["docker", "exec", "-i", instance.project]
+        assert call.args[0][:6] == ["docker", "exec", "--user", str(os.getuid()), "-i", instance.project]
     assert calls[1].args[0][-1] == "./scripts/setup"
     implementation = calls[2]
     assert "private-bearer" not in " ".join(implementation.args[0])
@@ -118,7 +125,7 @@ def test_cleanup_uses_exact_labels_not_agent_compose_and_separate_budget(sandbox
     removals = [a for a in args if "rm" in a and a[-1] in {"container-id", "network-id", "volume-name"}]
     assert [a[1] for a in removals] == ["container", "network", "volume"]
     assert not any("compose" in a or "prune" in a for a in args)
-    assert any(call.args[1] == "workspace ownership" for call in calls)
+    assert not any(call.args[1] == "workspace ownership" or call.args[0][1] == "run" for call in calls)
 
 
 @pytest.mark.parametrize("kind,identity", [("container", "a" * 64), ("network", "b" * 64), ("volume", "owned-data")])
@@ -143,7 +150,6 @@ def test_failed_resource_removal_requires_confirmed_absence(sandbox, kind, ident
         "container removal",
         "network removal",
         "volume removal",
-        "ownership",
     ],
 )
 def test_cleanup_failure_does_not_claim_success_or_broaden_scope(sandbox, monkeypatch, phase) -> None:
@@ -166,31 +172,18 @@ def test_cleanup_failure_does_not_claim_success_or_broaden_scope(sandbox, monkey
 
     owned = Mock(side_effect=discover)
     monkeypatch.setattr(instance, "owned", owned)
-    restore = Mock(side_effect=FactoryError("ownership failed") if phase == "ownership" else None)
-    monkeypatch.setattr(instance, "restore_ownership", restore)
     with pytest.raises(FactoryError):
         instance.stop()
     assert owned.call_count == 3
-    if phase in {"agent removal", "container discovery", "container removal"}:
-        restore.assert_not_called()
-    else:
-        restore.assert_called_once_with(cleanup)
+    assert not hasattr(instance, "restore_ownership")
 
 
-def test_ownership_timeout_still_removes_its_named_helper(sandbox, monkeypatch) -> None:
-    instance, _ = sandbox
-    commands = Mock()
-    commands.run.side_effect = FactoryError("issue-run deadline expired")
-    cleanup = Mock()
-    cleanup.run.return_value = ""
-    monkeypatch.setattr("software_factory.sandbox.Commands", Mock(return_value=cleanup))
-    with pytest.raises(FactoryError, match="deadline"):
-        instance.restore_ownership(commands)
-    assert cleanup.run.call_args.args[0] == ["docker", "container", "rm", "--force", instance.project + "-ownership"]
-    args = commands.run.call_args.args[0]
-    assert "--network" in args and "none" in args
-    assert "docker.sock" not in " ".join(args)
-    assert "chown -h" in " ".join(args)
+def test_user_configuration_failure_never_falls_back_to_root(sandbox) -> None:
+    instance, commands = sandbox
+    commands.run.side_effect = ["", FactoryError("agent user configuration failed")]
+    with pytest.raises(FactoryError, match="user configuration"):
+        instance.start()
+    assert len(commands.run.call_args_list) == 2
 
 
 @pytest.mark.parametrize(

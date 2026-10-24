@@ -56,6 +56,23 @@ def implement(instance):
     return bearer
 
 
+def test_host_user_has_writable_home_caches_socket_and_explicit_root(sandbox) -> None:
+    assert execute(sandbox, "id", "-u").strip() == str(os.getuid())
+    assert execute(sandbox, "id", "-g").strip() == str(os.getgid())
+    execute(sandbox, "sh", "-ec", 'mkdir -p "$XDG_CACHE_HOME"; touch "$HOME/home-write" "$XDG_CACHE_HOME/cache-write"')
+    assert execute(sandbox, "sudo", "-n", "id", "-u").strip() == "0"
+    execute(sandbox, "sudo", "-n", "sh", "-ec", 'test "$HOME" = "$(getent passwd 0 | cut -d: -f6)"')
+    execute(sandbox, "sudo", "-n", "sh", "-ec", "printf installed > /usr/local/share/factory-system-install")
+    assert execute(sandbox, "cat", "/usr/local/share/factory-system-install").strip() == "installed"
+    execute(sandbox, "docker", "info")
+    execute(sandbox, "sh", "-ec", "printf ordinary > ordinary-output")
+    before = (sandbox.workspace / "ordinary-output").stat()
+    sandbox.stop()
+    after = (sandbox.workspace / "ordinary-output").stat()
+    assert (before.st_uid, before.st_gid, before.st_mode) == (after.st_uid, after.st_gid, after.st_mode)
+    assert after.st_uid == os.getuid()
+
+
 def test_real_build_compose_socket_same_path_setup_pi_service_verify_and_host_access(sandbox) -> None:
     instance = sandbox
     assert execute(instance, "pwd").strip() == str(instance.workspace)
@@ -77,7 +94,7 @@ def test_real_build_compose_socket_same_path_setup_pi_service_verify_and_host_ac
     instance.verify()
     assert (instance.workspace / "service-response").read_text() == "implemented\n"
     inspected = json.loads(subprocess.check_output(["docker", "inspect", instance.project], text=True))[0]
-    assert inspected["Config"]["User"] == "0:0"
+    assert inspected["Config"]["User"] == f"{os.getuid()}:{os.getgid()}"
     assert {mount["Source"] for mount in inspected["Mounts"] if mount["Type"] == "bind"} == {
         str(instance.workspace),
         instance.socket_path,
@@ -93,6 +110,56 @@ def test_real_build_compose_socket_same_path_setup_pi_service_verify_and_host_ac
     assert private.stat().st_gid == os.getgid()
     assert (instance.directory / "run.log").stat().st_mode & 0o777 == 0o600
     assert bearer not in (instance.directory / "run.log").read_text()
+
+
+@pytest.mark.parametrize("uid,gid", [(65534, 46123), (46123, 20), (0, 0)])
+def test_numeric_identity_handles_existing_and_new_accounts(sandbox, monkeypatch, uid, gid) -> None:
+    sandbox.stop()
+    with monkeypatch.context() as identity:
+        identity.setattr("software_factory.sandbox.os.getuid", lambda: uid)
+        identity.setattr("software_factory.sandbox.os.getgid", lambda: gid)
+        instance = Sandbox(sandbox.image_id, sandbox.env["DOCKER_HOST"], sandbox.directory, Commands())
+        try:
+            instance.start()
+            assert execute(instance, "id", "-u").strip() == str(uid)
+            assert execute(instance, "id", "-g").strip() == str(gid)
+            assert execute(instance, "sudo", "-n", "id", "-u").strip() == "0"
+            execute(instance, "docker", "info")
+        finally:
+            instance.stop()
+
+
+def test_root_user_configuration_does_not_import_workspace_python_modules(sandbox) -> None:
+    sandbox.stop()
+    (sandbox.workspace / "uuid.py").write_text("raise RuntimeError('untrusted workspace import')\n")
+    instance = Sandbox(sandbox.image_id, sandbox.env["DOCKER_HOST"], sandbox.directory, Commands())
+    try:
+        instance.start()
+        assert execute(instance, "id", "-u").strip() == str(os.getuid())
+    finally:
+        instance.stop()
+
+
+def test_cleanup_preserves_file_modes_ownership_symlinks_and_git_diff(sandbox) -> None:
+    execute(
+        sandbox,
+        "sh",
+        "-ec",
+        "printf readonly > readonly; chmod 444 readonly; "
+        "printf executable > group-executable; chmod 654 group-executable; "
+        "ln -s /etc/passwd external-link",
+    )
+    files = [sandbox.workspace / name for name in ("readonly", "group-executable", "external-link")]
+    before = [(path.lstat().st_uid, path.lstat().st_gid, path.lstat().st_mode) for path in files]
+    git = ["git", "-C", str(sandbox.workspace)]
+    subprocess.run(git + ["init"], check=True, capture_output=True)
+    subprocess.run(git + ["add", "."], check=True, capture_output=True)
+    diff = subprocess.check_output(git + ["diff", "--cached", "--raw"])
+    sandbox.stop()
+    assert [(path.lstat().st_uid, path.lstat().st_gid, path.lstat().st_mode) for path in files] == before
+    subprocess.run(git + ["add", "."], check=True, capture_output=True)
+    assert subprocess.check_output(git + ["diff", "--cached", "--raw"]) == diff
+    assert os.readlink(files[-1]) == "/etc/passwd"
 
 
 def test_service_verification_failure_is_completed_private_feedback(sandbox) -> None:
@@ -120,9 +187,17 @@ def test_invalid_entrypoint_prevents_setup(sandbox, entrypoint, invalid) -> None
     assert not sandbox.owned(Commands(), "network")
 
 
+def test_setup_permission_failure_is_not_retried_as_root(sandbox) -> None:
+    setup = sandbox.workspace / "scripts/setup"
+    setup.write_text("#!/bin/sh\nprintf denied > /usr/local/share/forbidden-install\n")
+    with pytest.raises(FactoryError, match="setup failed"):
+        sandbox.setup()
+    execute(sandbox, "test", "!", "-e", "/usr/local/share/forbidden-install")
+
+
 def test_setup_failure_never_becomes_implementation(sandbox) -> None:
     setup = sandbox.workspace / "scripts/setup"
-    setup.write_text(setup.read_text() + "printf diagnostic > setup-diagnostic\nchmod 000 setup-diagnostic\nexit 8\n")
+    setup.write_text(setup.read_text() + "printf diagnostic > setup-diagnostic\nexit 8\n")
     with pytest.raises(FactoryError, match="setup failed"):
         sandbox.setup()
     assert len(sandbox.owned(Commands(), "container")) == 2
@@ -241,7 +316,7 @@ def test_removed_verify_and_stopped_agent_are_not_completed_verification(sandbox
     assert not isinstance(failure.value, VerificationFailed)
 
 
-def test_cleanup_failure_restores_host_access_when_owned_network_is_still_in_use(sandbox) -> None:
+def test_cleanup_failure_preserves_permissions_when_owned_network_is_still_in_use(sandbox) -> None:
     instance = sandbox
     execute(instance, "sh", "-ec", "printf retained > cleanup-diagnostic; chmod 000 cleanup-diagnostic")
     private = instance.workspace / "cleanup-diagnostic"
@@ -267,12 +342,11 @@ def test_cleanup_failure_restores_host_access_when_owned_network_is_still_in_use
     try:
         with pytest.raises(FactoryError, match="cleanup failed"):
             instance.stop()
-        assert private.stat().st_mode & 0o600 == 0o600
+        assert private.stat().st_mode & 0o777 == 0
         assert private.stat().st_uid == os.getuid()
         assert private.stat().st_gid == os.getgid()
-        assert private.read_text() == "retained"
-        private.write_text("host can edit retained diagnostics\n")
         assert not instance.owned(Commands(), "container")
         Commands().run(["docker", "container", "inspect", name], "unowned resource preserved", env=instance.env)
     finally:
+        private.chmod(0o600)  # Explicit test-fixture disposal, not factory permission repair.
         Commands().run(["docker", "rm", "--force", name], "unowned resource cleanup", env=instance.env)
