@@ -17,17 +17,15 @@ from software_factory.sandbox import PI_FLAGS, copilot_endpoint
 
 LOGGER = logging.getLogger("software_factory")
 
-# Check execution/tool availability without mounts, credentials, network access, or target repository commands.
+# Smoke-run baseline tools without mounts, credentials, network access, or target repository commands.
 RUNTIME_CHECK = """set -eu
  test "$(id -u)" = 0
  test "$(uname -m)" = aarch64
- for tool in pi node npm docker python uv bash git make cc c++ curl tar unzip; do command -v "$tool" >/dev/null; done
+ for tool in pi node npm docker python uv bash git make cc c++ curl tar; do "$tool" --version >/dev/null; done
+ unzip -v >/dev/null
  node -e 'const [a,b] = process.versions.node.split(".").map(Number);
    if(a < 22 || (a === 22 && b < 19)) process.exit(1)'
- pi --version
  docker compose version
- python --version
- uv --version
  test -s /etc/ssl/certs/ca-certificates.crt
 """
 

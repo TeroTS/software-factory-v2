@@ -8,6 +8,10 @@ from pathlib import Path
 
 import pytest
 
+from software_factory.config import Config
+from software_factory.process import Commands, FactoryError
+from software_factory.runner import preflight
+
 ROOT = Path(__file__).resolve().parents[1]
 IMAGE = os.environ.get("FACTORY_AGENT_IMAGE", "software-factory-agent:1.0.0")
 pytestmark = [
@@ -66,6 +70,42 @@ def test_shared_image_has_pinned_native_baseline_and_no_credentials() -> None:
         text=True,
         timeout=60,
     )
+
+
+@pytest.mark.parametrize("tool", ["npm", "bash", "git", "make", "cc", "c++", "curl", "tar", "unzip"])
+def test_startup_rejects_broken_required_tool_and_removes_probe(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, tool: str
+) -> None:
+    calls = []
+
+    class ScriptedAuthentication(Commands):
+        def run(self, args, phase, **kwargs):
+            calls.append((args, phase))
+            if phase == "GitHub authentication":
+                return ""
+            if phase == "Copilot authentication":
+                return f"proxy-ep=proxy.business.githubcopilot.com;exp={int(time.time()) + 1800}"
+            if phase == "agent runtime":
+                fixture = (
+                    "mkdir /tmp/broken-bin\n"
+                    f"printf '#!/bin/sh\\nexit 42\\n' > /tmp/broken-bin/{tool}\n"
+                    f"chmod 755 /tmp/broken-bin/{tool}\n"
+                    "export PATH=/tmp/broken-bin:$PATH\n"
+                )
+                args = [*args[:-1], fixture + args[-1]]
+            return super().run(args, phase, **kwargs)
+
+    monkeypatch.setattr("software_factory.runner.Commands", ScriptedAuthentication)
+    monkeypatch.setattr("software_factory.runner.shutil.which", lambda name: "/bin/" + name)
+    config = Config("owner/repo", "chosen", IMAGE, tmp_path / "artifacts")
+    with pytest.raises(FactoryError, match="agent runtime check failed"):
+        preflight(config)
+    runtime = next(args for args, phase in calls if phase == "agent runtime")
+    name = runtime[runtime.index("--name") + 1]
+    assert calls[-1] == (["docker", "rm", "--force", "--volumes", name], "startup cleanup")
+    containers = subprocess.check_output(["docker", "ps", "-aq", "--filter", f"name=^{name}$"], text=True)
+    assert not containers.strip(), "failed startup probe left a container behind"
+    assert list(config.artifacts_dir.iterdir()) == []
 
 
 @pytest.mark.parametrize("queued", [False, True])
