@@ -2,10 +2,4 @@
 set -eu
 cd "$(dirname "$0")/.."
 test -d src
-set --
-# shortcut: no application source exists yet; enforce the configured threshold as soon as Python source is added.
-if ! find src -type f -name '*.py' -print -quit | grep -q .; then
-    printf '%s\n' 'No application source: coverage baseline unavailable; bootstrap tests still run under coverage.' >&2
-    set -- --cov-fail-under=0
-fi
-exec uv run --frozen pytest --cov=src --cov-report=term-missing --cov-report=xml "$@"
+exec uv run --frozen pytest --cov=src --cov-report=term-missing --cov-report=xml

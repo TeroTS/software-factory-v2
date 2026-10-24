@@ -18,7 +18,7 @@ def test_coverage_policy() -> None:
 
 
 @pytest.mark.parametrize("has_source", [None, False, True])
-def test_coverage_threshold_only_relaxed_without_application_source(tmp_path: Path, has_source: bool | None) -> None:
+def test_coverage_never_disables_threshold(tmp_path: Path, has_source: bool | None) -> None:
     (tmp_path / "scripts").mkdir()
     shutil.copy2(ROOT / "scripts" / "coverage", tmp_path / "scripts" / "coverage")
     if has_source is not None:
@@ -46,17 +46,18 @@ def test_coverage_threshold_only_relaxed_without_application_source(tmp_path: Pa
     assert result.returncode == 7
     args = result.stdout.splitlines()
     assert args[:4] == ["run", "--frozen", "pytest", "--cov=src"]
-    assert ("--cov-fail-under=0" in args) is not has_source
-    assert ("baseline unavailable" in result.stderr) is not has_source
+    assert "--cov-fail-under=0" not in args
+    assert result.stderr == ""
 
 
 @pytest.mark.parametrize("entrypoint", ["setup", "verify"])
-def test_entrypoints_preserve_task_failure(tmp_path: Path, entrypoint: str) -> None:
+@pytest.mark.parametrize("exit_code", [0, 9])
+def test_entrypoints_preserve_task_result(tmp_path: Path, entrypoint: str, exit_code: int) -> None:
     (tmp_path / "scripts").mkdir()
     shutil.copy2(ROOT / "scripts" / entrypoint, tmp_path / "scripts" / entrypoint)
     (tmp_path / "bin").mkdir()
     make = tmp_path / "bin" / "make"
-    make.write_text('#!/bin/sh\npwd\nprintf "%s\\n" "$@"\nexit 9\n')
+    make.write_text(f'#!/bin/sh\npwd\nprintf "%s\\n" "$@"\nexit {exit_code}\n')
     make.chmod(0o755)
 
     result = subprocess.run(
@@ -68,7 +69,7 @@ def test_entrypoints_preserve_task_failure(tmp_path: Path, entrypoint: str) -> N
         check=False,
     )
 
-    assert result.returncode == 9
+    assert result.returncode == exit_code
     assert result.stdout.splitlines() == [str(tmp_path.resolve()), entrypoint]
 
 

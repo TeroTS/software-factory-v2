@@ -1,4 +1,4 @@
-# Labeled issue → validated draft PR (US-01 / US-02)
+# Labeled issue → validated draft PR (US-01 / US-02 / US-03)
 
 ## Chronological steps
 
@@ -50,12 +50,33 @@
   treated as completed verification failures that authorize another repair.
 - US-02 live recovery-to-PR acceptance passed: issue 9 → draft PR 10 after one
   formatting-check failure and one repair, with independent CI green. See the
-  [completion evidence](../slices/current-slice.md).
+  [recorded acceptance](../../README.md#verification-beyond-unit-tests).
 - Failure or interruption does not automatically retry or resume work. The
   operator must explicitly reapply the label and resolve any blocking remote
-  branch. Successful manual-requeue acceptance remains US-03 work.
+  branch. US-03 live acceptance passed: issue 13 was interrupted, stayed idle
+  across restart, then explicit manual requeue produced draft PR 14 with independent
+  CI green. See the [completion evidence](../slices/current-slice.md).
 - The factory does not merge or implement review feedback. Passing verification
   does not guarantee requirement fulfillment; human review remains required.
+
+## Manual requeue
+
+1. Inspect the failed run's issue status and private diagnostics. After a hard
+   crash, stop/remove any leftover run-owned containers before starting the single
+   runner; restart alone does not requeue the issue.
+2. Check `factory/issue-<number>`. A matching open PR is preserved and linked,
+   not executed again. If the remote branch exists without an open PR, inspect
+   and delete it yourself before reapplying the trigger; the runner never
+   overwrites it. A closed PR does not bypass this check.
+3. Edit the issue title/body if needed, then explicitly reapply `agent:implement`.
+   A skip consumes the trigger too; branch cleanup after a skip requires another
+   label reapplication.
+4. The next poll repeats duplicate/branch checks and, if clear, captures a fresh
+   snapshot and default-branch workspace with a new 900-second budget and up to
+   three repairs. It does not resume the previous workspace or Pi session, and
+   leaves earlier failed workspaces/logs intact until operator deletion.
+
+All explicit stories are complete; no next story is defined in `SPEC.md`.
 
 ## References
 
