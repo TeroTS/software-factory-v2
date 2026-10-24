@@ -1,4 +1,4 @@
-# US-01: Labeled issue → validated draft PR
+# Labeled issue → validated draft PR (US-01 / US-02)
 
 ## Chronological steps
 
@@ -21,7 +21,10 @@
    exist and be executable.
 10. **Pi coding agent implements the issue unattended**, using the snapshot and
     repository contents, without retrieving comments, attachments, or linked pages.
-11. **Sandbox runs `./scripts/verify`.**
+11. **Sandbox runs `./scripts/verify`.** After a completed check fails, Pi receives
+    its stdout/stderr plus the unchanged task snapshot and repairs the same workspace.
+    The runner re-verifies with the same command, allowing at most three repairs
+    after the initial implementation and stopping at the first passing check.
 12. **Local runner stops and removes run-owned sandbox containers.**
 13. **Local runner confirms changes exist** and commits them using trusted
     host-side Git.
@@ -38,12 +41,16 @@
 
 - Failures stop normal progression, retain local diagnostics, and report failure
   where possible. Container cleanup is always attempted.
-- One 15-minute issue-run deadline covers setup, implementation, verification,
-  and publication. Cleanup and failure reporting are attempted even after expiry.
+- One 15-minute issue-run deadline covers setup, implementation, all repairs and
+  verification, and publication. It never resets between attempts. Cleanup and failure reporting are attempted even after expiry.
 - Passing verification without changes fails with `no changes produced`; no PR
   is created.
-- Verification failure currently fails the run immediately. Bounded repairs are
-  deferred to US-02.
+- Three unsuccessful repairs fail the issue run without a PR and retain diagnostics.
+  Missing scripts, setup/provider errors, and sandbox/publication failures are not
+  treated as completed verification failures that authorize another repair.
+- US-02 live recovery-to-PR acceptance passed: issue 9 → draft PR 10 after one
+  formatting-check failure and one repair, with independent CI green. See the
+  [completion evidence](../slices/current-slice.md).
 - Failure or interruption does not automatically retry or resume work. The
   operator must explicitly reapply the label and resolve any blocking remote
   branch. Successful manual-requeue acceptance remains US-03 work.

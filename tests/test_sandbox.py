@@ -117,7 +117,7 @@ def test_sandbox_runs_commands_with_snapshot_and_secret_only_on_stdin(
     from software_factory.sandbox import PI_FLAGS, Sandbox
 
     commands = Mock()
-    commands.run.return_value = ""
+    commands.run.return_value = "\nFACTORY_VERIFY_EXIT=0\n"
     sandbox = Sandbox(prepared_compose=compose(tmp_path), service="agent", directory=tmp_path, commands=commands)
     sandbox.start()
     sandbox.setup()
@@ -141,8 +141,49 @@ def test_sandbox_runs_commands_with_snapshot_and_secret_only_on_stdin(
     assert payload["snapshot"]["title"] == "$(touch /host)"
     assert payload["flags"] == PI_FLAGS
     assert calls[2].args[0][-1] == "./scripts/setup"
-    assert calls[4].args[0][-1] == "./scripts/verify"
+    assert "./scripts/verify" in calls[4].args[0][-1]
     assert (tmp_path / "compose.json").exists()
+
+
+def test_failed_verification_supplies_redacted_stdout_and_stderr_for_repair(tmp_path: Path) -> None:
+    from software_factory.sandbox import Sandbox, VerificationFailed
+
+    commands = Mock()
+    commands.secrets = ["private-bearer"]
+    commands.run.return_value = "failed assertion\nprivate-bearer on stderr\n\nFACTORY_VERIFY_EXIT=8\n"
+    sandbox = Sandbox(compose(tmp_path), "agent", tmp_path, commands)
+    with pytest.raises(VerificationFailed) as failure:
+        sandbox.verify()
+    assert failure.value.output == "failed assertion\n[REDACTED] on stderr\n"
+    assert "failed assertion" not in str(failure.value)
+    assert "private-bearer" not in str(failure.value)
+    sandbox.implement({"number": 1}, "private-bearer", "endpoint", "model", verification_output=failure.value.output)
+    payload = json.loads(commands.run.call_args.kwargs["input"])
+    assert payload["verification_output"] == failure.value.output
+    assert commands.run.call_args.args[1] == "repair"
+    assert failure.value.output not in " ".join(commands.run.call_args.args[0])
+
+
+@pytest.mark.parametrize(
+    "result",
+    [
+        "",
+        "partial output",
+        "\nFACTORY_VERIFY_EXIT=not-a-number\n",
+        "\nFACTORY_VERIFY_EXIT=256\n",
+    ],
+)
+def test_incomplete_verification_result_is_not_a_repairable_failure(tmp_path: Path, result: str) -> None:
+    from software_factory.process import FactoryError
+    from software_factory.sandbox import Sandbox, VerificationFailed
+
+    commands = Mock()
+    commands.run.return_value = result
+    commands.secrets = []
+    sandbox = Sandbox(compose(tmp_path), "agent", tmp_path, commands)
+    with pytest.raises(FactoryError) as failure:
+        sandbox.verify()
+    assert not isinstance(failure.value, VerificationFailed)
 
 
 @pytest.mark.parametrize(

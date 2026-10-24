@@ -1,4 +1,4 @@
-# Orchestrate US-01 serial issue runs through GitHub, isolated Compose execution, verification, and host publication.
+# Orchestrate serial issue runs through GitHub, isolated implementation/repair, verification, and host publication.
 import copy
 import json
 import logging
@@ -11,7 +11,14 @@ from software_factory.config import Config
 from software_factory.github import GitHub
 from software_factory.process import Commands, FactoryError
 from software_factory.repository import Repository
-from software_factory.sandbox import PI_FLAGS, Sandbox, copilot_endpoint, docker_environment, prepare_compose
+from software_factory.sandbox import (
+    PI_FLAGS,
+    Sandbox,
+    VerificationFailed,
+    copilot_endpoint,
+    docker_environment,
+    prepare_compose,
+)
 
 LOGGER = logging.getLogger("software_factory")
 
@@ -63,7 +70,7 @@ class Runner:
         for number in github.discover():
             self.process_issue(number)
 
-    # Execute one first-pass issue run, retaining failures and always attempting container cleanup.
+    # Execute one issue run with at most three verification repairs, retaining failures and always attempting cleanup.
     def process_issue(self, number: int) -> None:
         directory = Path(tempfile.mkdtemp(prefix=f"issue-{number}-", dir=self.artifacts)).resolve()
         commands = Commands(time.monotonic() + 900, directory / "run.log")
@@ -118,7 +125,16 @@ class Runner:
                 sandbox.start()
                 sandbox.setup()
                 sandbox.implement(snapshot, bearer, endpoint, self.config.model)
-                sandbox.verify()
+                for attempt in range(4):
+                    try:
+                        sandbox.verify()
+                        break
+                    except VerificationFailed as error:
+                        if attempt == 3:
+                            raise FactoryError("verification failed after 3 repair attempts") from None
+                        sandbox.implement(
+                            snapshot, bearer, endpoint, self.config.model, verification_output=error.output
+                        )
                 sandbox.stop()
                 sandbox = None
                 repository.commit(number)

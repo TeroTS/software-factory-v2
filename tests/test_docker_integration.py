@@ -3,6 +3,7 @@ import os
 import subprocess
 import time
 from pathlib import Path
+from unittest.mock import Mock
 
 import pytest
 from tests_support import prepared_compose
@@ -109,6 +110,137 @@ def test_real_nonzero_verification_is_not_success(sandbox) -> None:
     instance.setup()
     with pytest.raises(FactoryError, match="verification failed"):
         instance.verify()
+
+
+def test_real_verification_feedback_includes_both_streams_and_can_be_repaired(sandbox) -> None:
+    from software_factory.sandbox import VerificationFailed
+
+    instance, _ = sandbox
+    instance.setup()
+    instance.commands.run(
+        instance.base + ["exec", "-T", "agent", "sh", "-c", "cat > ./scripts/verify"],
+        "test verification fixture",
+        input="#!/bin/sh\necho checking stdout\necho checking stderr >&2\ntest -f implemented\n",
+    )
+    with pytest.raises(VerificationFailed) as failure:
+        instance.verify()
+    assert "checking stdout" in failure.value.output
+    assert "checking stderr" in failure.value.output
+    instance.commands.run(instance.base + ["exec", "-T", "agent", "touch", "implemented"], "test repair")
+    instance.verify()
+
+
+def test_missing_verification_after_implementation_is_not_repairable(sandbox) -> None:
+    from software_factory.sandbox import VerificationFailed
+
+    instance, _ = sandbox
+    instance.setup()
+    instance.commands.run(instance.base + ["exec", "-T", "agent", "rm", "./scripts/verify"], "test missing script")
+    with pytest.raises(FactoryError) as failure:
+        instance.verify()
+    assert not isinstance(failure.value, VerificationFailed)
+
+
+def test_container_failure_is_not_repairable_verification(sandbox) -> None:
+    from software_factory.sandbox import VerificationFailed
+
+    instance, _ = sandbox
+    instance.setup()
+    instance.stop()
+    with pytest.raises(FactoryError) as failure:
+        instance.verify()
+    assert not isinstance(failure.value, VerificationFailed)
+
+
+@pytest.mark.parametrize("outcome", ["success", "exhausted", "repair-timeout", "verify-timeout"])
+def test_runner_recovery_with_real_compose_and_shared_command_deadline(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, outcome: str
+) -> None:
+    from software_factory.config import Config
+    from software_factory.runner import Runner
+
+    github = Mock()
+    github.open_pr.return_value = None
+    github.branch_exists.return_value = False
+    github.snapshot.return_value = {"number": 1, "title": "implement", "body": None}
+    github.default_branch.return_value = "main"
+    github.publish.return_value = "https://github.com/owner/repo/pull/1"
+    repositories = []
+    sandboxes = []
+
+    def checkout(directory, commands):
+        repo = Mock()
+        repo.workspace = directory / "workspace"
+        scripts = repo.workspace / "scripts"
+        scripts.mkdir(parents=True)
+        for name, body in [
+            ("setup", "touch prepared"),
+            ("verify", "echo missing implementation >&2; test -f implemented"),
+        ]:
+            path = scripts / name
+            path.write_text("#!/bin/sh\n" + body + "\n")
+            path.chmod(0o755)
+        repo.checkout.return_value = "a" * 40
+        repositories.append(repo)
+        return repo
+
+    class AuthenticatedCommands(Commands):
+        def run(self, args, phase, **kwargs):
+            if phase == "Copilot authentication":
+                return f"proxy-ep=proxy.business.githubcopilot.com;exp={int(time.time()) + 1800}"
+            return super().run(args, phase, **kwargs)
+
+    class ScriptedAgentSandbox(Sandbox):
+        def __init__(self, *args):
+            super().__init__(*args)
+            self.original_deadline = self.commands.deadline
+            self.feedback = []
+            sandboxes.append(self)
+
+        def implement(self, snapshot, bearer, endpoint, model, *, verification_output=None):
+            assert self.commands.deadline == self.original_deadline
+            assert snapshot == {"number": 1, "title": "implement", "body": None, "base_commit": "a" * 40}
+            if verification_output is None:
+                return
+            self.feedback.append(verification_output)
+            assert "missing implementation" in verification_output
+            action = "touch implemented" if outcome == "success" else "true"
+            if outcome in {"repair-timeout", "verify-timeout"}:
+                self.commands.deadline = time.monotonic() + 0.3
+                if outcome == "repair-timeout":
+                    action = "sleep 2; touch too-late"
+                else:
+                    action = "printf '#!/bin/sh\\nsleep 2\\ntouch too-late\\n' > ./scripts/verify"
+            self.commands.run(self.base + ["exec", "-T", self.service, "sh", "-c", action], "repair")
+
+    monkeypatch.setattr("software_factory.runner.GitHub", Mock(return_value=github))
+    monkeypatch.setattr("software_factory.runner.Repository", checkout)
+    monkeypatch.setattr("software_factory.runner.Commands", AuthenticatedCommands)
+    monkeypatch.setattr("software_factory.runner.Sandbox", ScriptedAgentSandbox)
+    config = Config("owner/repo", tmp_path / "compose.yaml", "agent", "chosen")
+    runner = Runner(config, prepare_compose(prepared_compose(tmp_path), "agent", tmp_path), tmp_path / "artifacts")
+    runner.process_issue(1)
+    instance = sandboxes[0]
+    assert len(instance.feedback) == (3 if outcome == "exhausted" else 1)
+    ids = subprocess.check_output(
+        ["docker", "ps", "-aq", "--filter", f"label=com.docker.compose.project={instance.project}"], text=True
+    )
+    assert ids.strip() == ""
+    if outcome == "success":
+        repositories[0].commit.assert_called_once_with(1)
+        github.publish.assert_called_once()
+        assert "Succeeded:" in github.comment.call_args.args[1]
+        assert list(runner.artifacts.iterdir()) == []
+    else:
+        repositories[0].commit.assert_not_called()
+        github.publish.assert_not_called()
+        summary = github.comment.call_args.args[1]
+        assert ("3 repair attempts" if outcome == "exhausted" else "deadline expired") in summary
+        assert "missing implementation" not in summary
+        directory = next(runner.artifacts.iterdir())
+        assert "missing implementation" in (directory / "run.log").read_text()
+        time.sleep(0 if outcome == "exhausted" else 2)
+        assert not (directory / "workspace/too-late").exists()
 
 
 def test_missing_scripts_prevent_setup(sandbox) -> None:

@@ -105,6 +105,14 @@ def copilot_endpoint(bearer: str) -> str:
     return f"https://api.{endpoint[1]}.githubcopilot.com"
 
 
+# Carry only completed verification's redacted output for repair; the public error stays concise.
+class VerificationFailed(FactoryError):
+    # Keep local feedback separate from the operator-visible summary to avoid publishing transcripts.
+    def __init__(self, output: str) -> None:
+        super().__init__("verification failed")
+        self.output = output
+
+
 # Own a unique Compose project and immutable host-side configuration outside the exposed workspace.
 class Sandbox:
     # Persist the prepared configuration outside the workspace; commands share the issue-run deadline.
@@ -145,27 +153,52 @@ class Sandbox:
             self.base + ["exec", "-T", self.service, "./scripts/setup"], "setup", cwd=self.directory, env=self.env
         )
 
-    # Supply task and Copilot bearer via stdin to a trusted Node wrapper, never as command arguments or host mounts.
-    def implement(self, snapshot: dict, bearer: str, endpoint: str, model: str) -> None:
+    # Send the immutable task, bearer, and optional failed-check feedback to a fresh nonpersistent Pi invocation.
+    def implement(
+        self, snapshot: dict, bearer: str, endpoint: str, model: str, *, verification_output: str | None = None
+    ) -> None:
         script = Path(__file__).with_name("sandbox_agent.mjs").read_text()
         self.commands.run(
             self.base + ["exec", "-T", self.service, "node", "--input-type=module", "-e", script],
-            "implementation",
+            "implementation" if verification_output is None else "repair",
             cwd=self.directory,
             env=self.env,
             input=json.dumps(
-                {"snapshot": snapshot, "bearer": bearer, "endpoint": endpoint, "model": model, "flags": PI_FLAGS}
+                {
+                    "snapshot": snapshot,
+                    "bearer": bearer,
+                    "endpoint": endpoint,
+                    "model": model,
+                    "flags": PI_FLAGS,
+                    "verification_output": verification_output,
+                }
             ),
         )
 
-    # Run the repository's canonical verification command once; a nonzero exit fails US-01 without repairs.
+    # Separate completed repository check failures from missing scripts, Docker errors, or deadline expiry.
     def verify(self) -> None:
-        self.commands.run(
-            self.base + ["exec", "-T", self.service, "./scripts/verify"],
+        output = self.commands.run(
+            self.base
+            + [
+                "exec",
+                "-T",
+                self.service,
+                "sh",
+                "-c",
+                "test -x ./scripts/verify || exit 127; ./scripts/verify 2>&1; "
+                'status=$?; printf "\\nFACTORY_VERIFY_EXIT=%s\\n" "$status"',
+            ],
             "verification",
             cwd=self.directory,
             env=self.env,
         )
+        feedback, marker, status = output.rpartition("\nFACTORY_VERIFY_EXIT=")
+        if not marker or not re.fullmatch(r"\d+\n", status) or not 0 <= int(status) <= 255:
+            raise FactoryError("verification did not return a valid result")
+        if int(status):
+            for secret in self.commands.secrets:
+                feedback = feedback.replace(secret, "[REDACTED]")
+            raise VerificationFailed(feedback)
 
     # Attempt cleanup with a separate bounded budget even after run expiry; propagate failures for local reporting.
     def stop(self) -> None:

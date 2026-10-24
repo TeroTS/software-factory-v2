@@ -273,9 +273,12 @@ at most three repair attempts after the initial implementation.
 
 - Contract artifacts implementers must read:
   - `docs/contracts.md`
-- Current implementation: `docs/slices/current-slice.md`, US-01 done with real
-  issue-to-PR evidence and automated failure/isolation checks. US-02 repair recovery and US-03 manual-requeue delivery
-  remain deferred. Implementation limits and operator preparation are in `README.md`.
+- Current implementation: US-01 and US-02 are done with real issue-to-PR and
+  recovery-to-PR evidence, plus automated failure/isolation checks.
+  `docs/slices/current-slice.md` records completed US-02: issue 9 → draft PR 10
+  after one verification failure and one repair, with independent target CI green.
+  US-03 manual-requeue delivery remains deferred. Implementation limits and
+  operator preparation are in `README.md`.
 - List `docs/contracts.md` under `## Contract Inputs` in
   `docs/slices/current-slice.md` when slice planning creates that file. No slice
   note or implementation is created by this contract-writing step.
@@ -287,5 +290,7 @@ at most three repair attempts after the initial implementation.
   `artifacts/operator/factory-smoke-test.toml`) and references the trusted Compose
   path, preserving Contracts 1 and 3. The complete approved issue-to-PR test passed
   for issue 7 → draft PR 8, with green independent CI and verified cleanup.
-  Human review/merge remains external; repair recovery and successful manual-requeue
-  acceptance remain US-02/US-03 work.
+  US-02 subsequently passed live acceptance: issue 9 → draft PR 10 after one
+  formatting-check failure and one repair; the repeated canonical verification and
+  both independent target CI runs passed with 18 tests and 100% coverage. Human
+  review/merge remains external; successful manual-requeue acceptance remains US-03 work.

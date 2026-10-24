@@ -3,70 +3,77 @@
 Status: done
 
 ## Slice Goal
-- Let the operator submit a labeled issue and receive a linked draft PR containing sandbox-validated changes.
+- Let the operator receive a validated draft PR after the factory repairs an initial verification failure without intervention.
 
 ## Slice Boundary
 - Actor: Operator.
-- Trigger: An issue receives `agent:implement` while the configured local runner is running.
-- Action: Submit the issue for unattended implementation.
-- Visible outcome: A draft PR containing validated changes is linked from the issue.
-- Authoritative state transition: Unclaimed labeled issue → GitHub-recorded successful issue run linked to a draft PR.
-- One first-pass issue-to-PR outcome through terminal operation, GitHub coordination, a real Compose sandbox, Pi/Copilot implementation, repository verification, and host-side publication; include end-to-end success and automated safety/failure checks, without a UI or database.
+- Trigger: Verification fails after the initial implementation of a submitted issue.
+- Action: Let the factory repair the failed verification without intervention.
+- Visible outcome: A draft PR is published after a permitted repair passes verification.
+- Authoritative state transition: Running issue run with failed verification → GitHub-recorded successful issue run linked to a draft PR.
+- One recovery-to-PR outcome in the existing issue run, including failure feedback to Pi, re-verification, publication, exhaustion checks, and shared-deadline checks.
 
 ## Stories In Scope
-- `US-01 Turn a labeled issue into a validated draft PR`
+- `US-02 Recover a verification failure through bounded repairs`
 
 ## Stories Completed In This Slice
-- `US-01 Turn a labeled issue into a validated draft PR`
+- `US-02 Recover a verification failure through bounded repairs`
 
 ## Stories Remaining In This Slice
 - None.
 
 ## Contract Inputs
-- `docs/contracts.md`, Contracts 1–6: terminal configuration, GitHub coordination, sandbox/Pi/Copilot isolation, setup/verification/deadline, trusted host publication, status/diagnostics/no automatic requeue.
-- Contract 4's repair cycles remain US-02 work; Contract 6's successful manual-requeue acceptance flow remains US-03 work.
+- `docs/contracts.md`, Contracts 3–4: immutable task and current workspace, failed verification feedback, nonpersistent Pi calls, at most three repair-and-verify cycles, one original 900-second deadline.
+- `docs/contracts.md`, Contracts 1–2 and 5–6: preserve configuration, serial coordination, duplicate protection, isolation, publication, concise reporting, local diagnostics, and no automatic requeue.
 
 ## Decision Inputs
 - None.
 
 ## Shared State Required Now
-- One trusted repository and operator-managed runner instance; no distributed lock or database.
-- Immutable issue title/body and default-branch base commit, fresh workspace, one 900-second issue-run budget, and run-owned Compose resources.
-- GitHub trigger label, exact factory branch/PR identity, concise status comments, and actual draft PR URL as durable coordination.
-- Host-only GitHub credentials and private Copilot-only bearer; failed-run diagnostics are local, not recovery checkpoints.
+- Existing immutable issue snapshot, workspace, sandbox, Copilot-only bearer, and original issue-run deadline.
+- Latest failed verification output and a bounded in-memory repair count; no new persistent recovery state or configuration.
 
 ## Operations / Endpoints / Surfaces In This Slice
-- Contracted terminal entrypoint, strict four-field operator TOML, serial 30-second polling, exact duplicate/branch skips, confirmed claim, and immutable task snapshot.
-- Prepared Compose setup → noninteractive Pi/Copilot → one verification, container cleanup, nonempty-diff gate, trusted host commit/create-only push, draft PR, and success/failure reporting.
-- Target-owned agent assets: `../factory-smoke-test/sandbox/agent/`; ignored host configuration: `artifacts/operator/factory-smoke-test.toml`.
-- No HTTP server, repair execution, automatic session resumption, merge, or review-driven revisions.
-- The approved acceptance run processed issue 7 only; no normal polling service was left running.
+- Existing runner verification/publication path, sandbox verification result handling, and noninteractive Pi repair prompt.
+- Automated runner, Pi bridge, and real Docker verification/recovery tests; explicit opt-in live recovery-to-PR acceptance.
+- Operator documentation describing repair limits and acceptance status.
+- Operator-approved live acceptance processed dedicated issue 9 only: add `--repeat N`, with a temporary initial off-by-one defect requested in its immutable task snapshot. The actual first verification failure was formatting, before pytest; Pi repaired formatting and the temporary defect, and the next canonical verification passed. Issue body: ignored `artifacts/operator/us02-repair-issue.md`.
+- Preflight passed against target `main` at `44a3e90e1ebb32909ff085ff6fdbd0902bf4915b`; no other trigger-labeled issues or factory runner were found. Existing PR 8 was open and non-draft and was left unchanged. No normal polling service was left running; US-03 was not started.
 
 ## Tests Required
-- Existing automated checks cover configuration, serial coordination, exact PR/branch identity, label-removal ordering, task snapshots, Compose/service isolation, private credentials, Pi invocation, setup/provider/verification/no-change/publication/reporting failures, deadline/interruption, local retention, and cleanup.
-- Real Git/process/Docker checks cover trusted metadata and hook/filter isolation, non-overwrite publication, dependency-backed verification, failure exits, deadline termination, and cleanup.
-- Live acceptance: `FACTORY_E2E_APPROVED=1 FACTORY_E2E_CONFIG="$PWD/artifacts/operator/factory-smoke-test.toml" FACTORY_E2E_ISSUE=7 uv run --frozen pytest tests/test_e2e.py -q -s` passed once in 72.83 seconds. Do not rerun against the existing PR; the test's duplicate guards intentionally reject that state.
-- Initial harness-only failure: the first discovery poll returned no issue immediately after labeling; no claim, workspace, or implementation occurred. The harness now allows bounded 30-second discovery polling while the trigger remains present, never reapplies it after claim, and stops after a claimed failure. Five offline regression checks cover delayed discovery, an already queued issue, no automatic requeue/retry, bounded waiting, and unrelated queued-issue protection.
-- Factory verification after the harness correction: `FACTORY_DOCKER_TESTS=1 FACTORY_E2E_APPROVED=0 ./scripts/verify` passed with 171 Python tests; three opt-in live checks were skipped in that repeatable suite. Python coverage: 97.15%; Node Pi bridge line/branch/function coverage: 100%. Reports: `coverage.xml`, `coverage.lcov`; both coverage gates enforce 80%.
-- Factory application commit `38805c9` passed CI: https://github.com/TeroTS/software-factory-v2/actions/runs/40017443406. No production application code changed during live acceptance; the new harness regression tests and completion documentation still need commit/push and their own CI run.
-- Draft PR head `2a008b2319866dc2e8d54aca0405742359791e0c` passed both independent target CI runs: https://github.com/TeroTS/factory-smoke-test/actions/runs/40019483495 and https://github.com/TeroTS/factory-smoke-test/actions/runs/40019477428. Target verification: 13 tests, 100% line/branch coverage.
+- First-pass success still invokes no repairs.
+- Recovery on any of the three permitted attempts stops at the first success, supplies the latest failed verification output and unchanged task snapshot, and preserves publication gates.
+- Exactly three unsuccessful repairs fail visibly, retain diagnostics, and create no PR.
+- Setup, provider, missing-entrypoint, sandbox, and publication failures do not become verification repairs.
+- Deadline expiry during repair or re-verification prevents further work/publication; cleanup and retained diagnostics remain intact.
+- Real Docker checks exercise failed verification feedback, repeated canonical verification, dependency-backed checks, deadline termination, and cleanup.
+- Explicit real end-to-end acceptance: one operator-approved dedicated smoke-target issue must encounter a genuine initial verification failure, repair it with Pi/Copilot, pass verification, and produce a linked draft PR. Requires explicit approval for live GitHub/Copilot writes; do not rerun US-01 issue 7 / PR 8.
+- Passed: `FACTORY_DOCKER_TESTS=1 FACTORY_E2E_APPROVED=0 FACTORY_COPILOT_TESTS=0 FACTORY_SMOKE_SANDBOX_TESTS=0 ./scripts/verify` — format/lint clean, 197 Python tests passed, 3 opt-in live checks skipped; Node bridge tests passed with 100% line/branch/function coverage. Both 80% gates remain unchanged.
+- Python coverage is 97.11% versus the previous slice's recorded 97.15% (down 0.04 percentage points). Investigation: all new sandbox branches are covered; the bounded runner loop adds an unreachable normal-exhaustion branch because every final iteration either breaks on success or raises on failure. No coverage exclusions were added. Reports: `coverage.xml`, `coverage.lcov`.
+- Real Docker recovery tests use a scripted agent and mocked GitHub/publication boundaries, not Pi/Copilot or remote writes. They passed success, exhaustion, deadline expiry during repair/re-verification, and cleanup. All test-owned containers were removed; an unrelated stopped Compose container was left untouched.
+- The live harness supports `FACTORY_E2E_REQUIRE_REPAIR=1` and rejects first-pass success as US-02 evidence. Two offline regression checks prove this assertion.
+- Passed live acceptance: `FACTORY_E2E_APPROVED=1 FACTORY_E2E_REQUIRE_REPAIR=1 FACTORY_E2E_CONFIG="$PWD/artifacts/operator/factory-smoke-test.toml" FACTORY_E2E_ISSUE=9 uv run --frozen pytest tests/test_e2e.py -q -s` — 1 passed in 115.63 seconds. A private local monitor copied the redacted run log before normal successful-run deletion; it did not replace or mock any runtime operation. Evidence: ignored `artifacts/operator/us02-issue-9/` (`acceptance.log`, `run.log`, `summary.json`, PR diff, and CI logs).
+- Inspected real phase sequence: setup → initial implementation → canonical verification exit 2 (format check) → one Pi/Copilot repair → canonical verification exit 0 → sandbox cleanup → host commit/create-only push → draft PR → success comment. The repaired target passed 18 tests with 100% line/branch coverage.
+- Independent target push CI passed: https://github.com/TeroTS/factory-smoke-test/actions/runs/40081442415. Independent target PR CI passed: https://github.com/TeroTS/factory-smoke-test/actions/runs/40081445595. Both verified head `f4971d235e7f273b61ab1601bf8ed2f965eb005d`, with 18 tests and 100% line/branch coverage.
+- At live acceptance, factory changes were uncommitted/unpushed; no remote factory CI result was claimed. Local CI-equivalent verification is recorded above. The operator subsequently requested commit and push of the completed US-02 changes.
 
 ## Not Now
-- US-02: up to three verification repair cycles and recovery-to-PR acceptance.
-- US-03: successful manual-requeue end-to-end demonstration; US-01 already prevents automatic requeue/resumption.
-- Multiple repositories/runners, parallel runs, database/checkpoints, webhook/API/UI, automatic target preparation, merging, and review-driven revisions.
-- Do not merge PR 8 or automatically begin another story; the human reviewer owns merge decisions.
+- US-03: successful manual-requeue end-to-end demonstration; no automatic requeue or session recovery.
+- Additional repositories/runners, parallel runs, new configuration, databases/checkpoints, credential renewal, UI/API, automatic target preparation, merging, or review-driven revisions.
+- US-01 is already complete (issue 7 → draft PR 8); do not modify or merge that PR.
 
 ## Done When
-- All US-01 acceptance gates have automated coverage, the real issue-to-linked-draft-PR path passes, and verification/reporting/cleanup evidence is inspected.
-- Independent target CI and factory application CI meet coverage policy; human review/merge remains external.
+- Automated success, exhaustion, failure-classification, and shared-deadline checks pass with coverage gates intact.
+- Real recovery-to-linked-draft-PR acceptance passes, with inspected failure/repair/verification logs, GitHub status, independent target CI, and container cleanup.
+- Acceptance evidence is inspected; leave the draft PR for independent human review and do not begin another story automatically.
 
 ## Completion Summary
-- Operator-approved [issue 7](https://github.com/TeroTS/factory-smoke-test/issues/7) produced [draft PR 8](https://github.com/TeroTS/factory-smoke-test/pull/8), branch `factory/issue-7`, head `2a008b2319866dc2e8d54aca0405742359791e0c`, from default-branch baseline `44a3e90`.
-- One actual first-pass issue run implemented the optional `--name` readiness greeting, passed repository verification, and published only README/application/test changes. No repair attempt was used.
-- The issue records [running](https://github.com/TeroTS/factory-smoke-test/issues/7#issuecomment-6374067424) and [success with the PR link](https://github.com/TeroTS/factory-smoke-test/issues/7#issuecomment-6374085419). The trigger label is absent; run-owned agent containers and the successful run directory were removed.
-- PR inspection confirmed preserved default/callable behavior, named output, blank-name error handling, meaningful tests, and no verification/configuration changes. Independent CI is green. PR 8 remains open and draft; issue 7 remains open pending human review/merge.
+- Operator-approved [issue 9](https://github.com/TeroTS/factory-smoke-test/issues/9) produced [draft PR 10](https://github.com/TeroTS/factory-smoke-test/pull/10), branch `factory/issue-9`, head `f4971d235e7f273b61ab1601bf8ed2f965eb005d`, from baseline `44a3e90e1ebb32909ff085ff6fdbd0902bf4915b`.
+- One real initial implementation failed canonical verification; one unattended repair received that failure output, corrected the changes, and passed the same verification command. No manual workspace intervention, session resumption, provider fallback, or extra issue run was used.
+- The actual recovery trigger was a Ruff formatting failure; pytest did not run in that first verification. Do not describe this evidence as an observed off-by-one test failure. The final inspected diff fixes the temporary staged defect and adds the requested positive-integer flag, preserved default/callable behavior, invalid-input handling, documentation, and meaningful tests without modifying verification/configuration.
+- The issue records [running](https://github.com/TeroTS/factory-smoke-test/issues/9#issuecomment-6382441630) and [success with the PR link](https://github.com/TeroTS/factory-smoke-test/issues/9#issuecomment-6382457159). The trigger label is absent; run-owned containers and the successful run directory were removed. An unrelated stopped Compose container was preserved.
+- Both independent target CI runs are green. PR 10 remains open and draft; issue 9 remains open pending human review/merge. The operator subsequently authorized committing and pushing the factory source changes and completion documentation; this does not authorize merging the target PR.
 
 ## Next Slice Recommendation
-- `US-02 Recover a verification failure through bounded repairs`.
-- Keep `US-03 Manually requeue a failed or interrupted issue` in view; reuse the existing fresh-workspace, GitHub coordination, and shared-deadline invariants without implementing that follow-up now.
+- `US-03 Manually requeue a failed or interrupted issue` is the next explicit story in `SPEC.md`.
+- Reuse fresh-workspace, new-snapshot, duplicate/branch checks, and per-run deadline/repair allowances; do not resume retained sessions or erase earlier failure artifacts. No additional explicit story follows US-03; do not start it without a new delivery request.

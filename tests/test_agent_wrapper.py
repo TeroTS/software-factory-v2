@@ -12,7 +12,9 @@ NODE = shutil.which("node")
 
 
 @pytest.mark.skipif(NODE is None, reason="Node is needed to exercise the sandbox Pi wrapper")
-@pytest.mark.parametrize("outcome", ["success", "missing-model", "catalog-failure", "execution-failure", "terminated"])
+@pytest.mark.parametrize(
+    "outcome", ["success", "repair", "missing-model", "catalog-failure", "execution-failure", "terminated"]
+)
 def test_agent_wrapper_uses_ephemeral_credentials_and_exact_model(tmp_path: Path, outcome: str) -> None:
     wrapper = Path(__file__).resolve().parents[1] / "src/software_factory/sandbox_agent.mjs"
     pi = tmp_path / "pi"
@@ -39,6 +41,8 @@ def test_agent_wrapper_uses_ephemeral_credentials_and_exact_model(tmp_path: Path
         "model": "chosen",
         "flags": PI_FLAGS + ["--no-context-files"],
     }
+    if outcome == "repair":
+        payload["verification_output"] = "assert actual == expected\nverification stderr"
     result = subprocess.run(
         [NODE, str(wrapper)],
         input=json.dumps(payload),
@@ -51,13 +55,18 @@ def test_agent_wrapper_uses_ephemeral_credentials_and_exact_model(tmp_path: Path
         assert "configured Copilot model is unavailable" in result.stderr
         assert "private-bearer" not in result.stderr
         return
-    expected = {"success": 0, "execution-failure": 8, "terminated": 1}
+    expected = {"success": 0, "repair": 0, "execution-failure": 8, "terminated": 1}
     assert result.returncode == expected[outcome], result.stderr
     output = json.loads(result.stdout)
     assert not Path(output["home"]).exists()
     assert output["auth"] == {"github-copilot": {"type": "api_key", "key": "private-bearer"}}
     assert output["models"]["providers"]["github-copilot"]["baseUrl"] == payload["endpoint"]
     assert "private-bearer" not in output["prompt"]
+    if outcome == "repair":
+        assert "Repair" in output["prompt"]
+        assert payload["verification_output"] in output["prompt"]
+    else:
+        assert "Failed verification output" not in output["prompt"]
     assert json.loads(output["prompt"].split("Task snapshot:\n", 1)[1]) == payload["snapshot"]
     for flag in [
         "--print",

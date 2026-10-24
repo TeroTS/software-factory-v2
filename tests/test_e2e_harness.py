@@ -25,6 +25,7 @@ def harness(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("FACTORY_E2E_APPROVED", "1")
     monkeypatch.setenv("FACTORY_E2E_CONFIG", str(tmp_path / "operator.toml"))
     monkeypatch.setenv("FACTORY_E2E_ISSUE", "7")
+    monkeypatch.delenv("FACTORY_E2E_REQUIRE_REPAIR", raising=False)
     monkeypatch.setattr(test_e2e, "load_config", Mock(return_value=config))
     monkeypatch.setattr(test_e2e, "preflight", Mock(return_value={}))
     monkeypatch.setattr(test_e2e, "Commands", Mock(return_value=commands))
@@ -80,6 +81,32 @@ def test_discovery_wait_is_bounded_without_trigger_reapplication(harness) -> Non
     assert runner.poll_once.call_count == 3
     assert sleep.call_args_list == [call(0), call(30), call(30)]
     assert all(request.kwargs.get("method") != "POST" for request in github.api.call_args_list)
+
+
+@pytest.mark.parametrize("recovered", [True, False])
+def test_repair_acceptance_requires_a_real_failure_followed_by_success(
+    harness, monkeypatch: pytest.MonkeyPatch, recovered: bool
+) -> None:
+    from software_factory.sandbox import Sandbox, VerificationFailed
+
+    github, runner, _ = harness
+    monkeypatch.setenv("FACTORY_E2E_REQUIRE_REPAIR", "1")
+    github.api.side_effect = [QUEUED, CLAIMED, {"draft": True, "body": "Closes #7"}, [[{"body": f"Succeeded: {URL}"}]]]
+    verify = Mock(side_effect=[VerificationFailed("actual failure"), None] if recovered else [None])
+    monkeypatch.setattr(Sandbox, "verify", verify)
+
+    def run():
+        try:
+            Sandbox.verify(Mock())
+        except VerificationFailed:
+            Sandbox.verify(Mock())
+
+    runner.poll_once.side_effect = run
+    if recovered:
+        test_e2e.test_operator_submits_issue_and_observes_linked_validated_draft_pr()
+    else:
+        with pytest.raises(AssertionError, match="repair recovery was not demonstrated"):
+            test_e2e.test_operator_submits_issue_and_observes_linked_validated_draft_pr()
 
 
 def test_another_queued_issue_prevents_polling(harness) -> None:

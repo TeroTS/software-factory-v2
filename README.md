@@ -4,7 +4,10 @@ A local Python runner turns `agent:implement` GitHub issues into sandbox-validat
 draft PRs. **US-01 passed real end-to-end acceptance:**
 [issue 7](https://github.com/TeroTS/factory-smoke-test/issues/7) produced
 [draft PR 8](https://github.com/TeroTS/factory-smoke-test/pull/8), with independent CI green.
-Repairs (US-02) and successful manual-requeue delivery (US-03) remain deferred.
+**US-02 also passed live acceptance:** [issue 9](https://github.com/TeroTS/factory-smoke-test/issues/9)
+recovered through one repair and produced [draft PR 10](https://github.com/TeroTS/factory-smoke-test/pull/10),
+with both independent target CI runs green.
+Successful manual-requeue delivery (US-03) remains deferred.
 See [SPEC.md](SPEC.md), [contracts](docs/contracts.md),
 [current slice](docs/slices/current-slice.md), [domain vocabulary](CONTEXT.md),
 and the [step-by-step issue-to-draft-PR workflow](docs/workflows/issue-to-draft-pr.md).
@@ -104,8 +107,13 @@ default-branch workspace, runs setup → Pi → verification in Compose, then st
 the sandbox before host-side publication. Only passing, nonempty changes can
 produce `factory/issue-<number>` and a draft PR with `Closes #<number>`.
 
-Verification failure currently fails immediately: no repair loops yet. All run
-commands share one 900-second deadline. Ctrl-C/SIGTERM triggers cleanup and
+A completed verification failure supplies its stdout/stderr to a fresh Pi call
+in the same workspace, with the same issue snapshot. The runner permits at most
+three repair-and-verify cycles and stops at the first passing verification.
+Exhaustion fails the run without publication. Missing scripts, setup/provider or
+sandbox errors, and publication failures are not retried as verification repairs.
+All run commands, including every repair and verification, share the original
+900-second deadline; it never resets between attempts. Ctrl-C/SIGTERM triggers cleanup and
 failure reporting; a hard crash can leave resources/status requiring operator inspection.
 The factory never merges, revises from review feedback, or resumes retained work.
 
@@ -148,7 +156,9 @@ blindly retried or force-pushed. Restarting does not restore trigger labels or r
 ## Verification beyond unit tests
 
 Real Docker checks include setup/verification, a local dependency service, isolation,
-missing entrypoints, failure exits, deadline termination, and cleanup.
+missing entrypoints, failure exits, repair feedback/re-verification, bounded runner
+recovery with a scripted agent, deadline termination, and cleanup. These checks do
+not substitute for live Pi/Copilot recovery-to-PR acceptance.
 
 A separate opt-in integration check exercises real Pi/Copilot coding in an empty
 isolated workspace; it is **not** the issue-to-PR end-to-end acceptance test:
@@ -169,7 +179,27 @@ FACTORY_E2E_APPROVED=1 FACTORY_E2E_CONFIG=/absolute/path/to/factory.toml \
   FACTORY_E2E_ISSUE=123 uv run --frozen pytest tests/test_e2e.py -s
 ```
 
-The approved issue-to-PR acceptance test passed for issue 7 in 72.83 seconds,
+To require US-02 evidence, use a fresh dedicated issue and add
+`FACTORY_E2E_REQUIRE_REPAIR=1` to the command above. The test observes actual
+sandbox verification results and requires an initial failure followed by success
+within the three-repair allowance, in addition to all issue-to-PR gates. It does
+not force a failure: select a dedicated recovery scenario with the operator.
+A first-pass PR does not prove US-02 and fails this acceptance mode. The PR may
+already exist when that assertion fails; inspect it rather than blindly rerunning.
+The approved US-02 live test passed for issue 9 in 115.63 seconds, producing draft
+PR 10 at `f4971d2` from baseline `44a3e90`. Initial canonical verification failed
+its Ruff format check (pytest had not run); Pi received that output, repaired
+formatting and the temporary staged off-by-one defect, and the same verification
+passed with 18 tests and 100% line/branch coverage. Exactly one repair was used.
+Both independent [push CI](https://github.com/TeroTS/factory-smoke-test/actions/runs/40081442415)
+and [PR CI](https://github.com/TeroTS/factory-smoke-test/actions/runs/40081445595) passed.
+The issue has its success link, the trigger label is absent, and run-owned containers
+and the successful run directory were removed. PR 10 remains draft for human review;
+no merge or US-03 run was performed. Private evidence is ignored under
+`artifacts/operator/us02-issue-9/`; the [slice note](docs/slices/current-slice.md)
+records the inspected evidence. Do not rerun against issue 9's existing PR.
+
+The approved US-01 issue-to-PR acceptance test passed for issue 7 in 72.83 seconds,
 producing draft PR 8 from baseline `44a3e90`. Both target CI checks passed with
 13 tests and 100% line/branch coverage. The issue has its success link, the trigger
 label is removed, and run-owned containers are gone. Nothing was merged.
@@ -178,7 +208,7 @@ GitHub discovery can lag immediately after label application. The harness permit
 up to three polls at 30-second intervals while the trigger remains present; it
 never reapplies the trigger after claim or retries a failed issue run. Do not
 rerun against issue 7's existing PR; select a fresh dedicated issue for another
-approved live test. See the [completion evidence](docs/slices/current-slice.md).
+approved live test. See [current implementation and acceptance status](docs/slices/current-slice.md).
 
 ## Source layout
 

@@ -132,6 +132,81 @@ def test_failures_retain_diagnostics_without_false_success(runtime, component: s
         sandbox.implement.assert_called_once()
 
 
+@pytest.mark.parametrize("successful_repair", [1, 2, 3])
+def test_repairs_use_latest_feedback_and_stop_at_first_success(runtime, successful_repair: int) -> None:
+    from software_factory.sandbox import VerificationFailed
+
+    runner, github, repo, sandbox, _ = runtime
+    sandbox.verify.side_effect = [VerificationFailed(f"failure {i}") for i in range(successful_repair)] + [None]
+    runner.poll_once()
+    assert sandbox.verify.call_count == successful_repair + 1
+    assert sandbox.implement.call_count == successful_repair + 1
+    initial = sandbox.implement.call_args_list[0]
+    for i, repair in enumerate(sandbox.implement.call_args_list[1:]):
+        assert repair.args == initial.args
+        assert repair.kwargs == {"verification_output": f"failure {i}"}
+    sandbox.setup.assert_called_once()
+    repo.commit.assert_called_once_with(1)
+    repo.push.assert_called_once()
+    github.publish.assert_called_once()
+    assert "Succeeded:" in github.comment.call_args.args[1]
+    assert list(runner.artifacts.iterdir()) == []
+
+
+def test_three_failed_repairs_retain_artifacts_and_never_publish(runtime) -> None:
+    from software_factory.sandbox import VerificationFailed
+
+    runner, github, repo, sandbox, _ = runtime
+    sandbox.verify.side_effect = VerificationFailed("private verification transcript")
+    runner.poll_once()
+    assert sandbox.verify.call_count == 4
+    assert sandbox.implement.call_count == 4
+    sandbox.stop.assert_called_once()
+    repo.commit.assert_not_called()
+    github.publish.assert_not_called()
+    assert "3 repair attempts" in github.comment.call_args.args[1]
+    assert "private verification transcript" not in str(github.comment.call_args_list)
+    assert len(list(runner.artifacts.iterdir())) == 1
+
+
+@pytest.mark.parametrize("phase", ["repair", "reverification"])
+@pytest.mark.parametrize("failure", ["issue-run deadline expired", "provider or sandbox failed"])
+def test_recovery_failure_aborts_without_another_attempt(runtime, phase: str, failure: str) -> None:
+    from software_factory.sandbox import VerificationFailed
+
+    runner, github, repo, sandbox, _ = runtime
+    sandbox.verify.side_effect = [VerificationFailed("initial failure"), FactoryError(failure)]
+    if phase == "repair":
+        sandbox.implement.side_effect = [None, FactoryError(failure)]
+    runner.poll_once()
+    assert sandbox.implement.call_count == 2
+    assert sandbox.verify.call_count == (1 if phase == "repair" else 2)
+    sandbox.stop.assert_called_once()
+    repo.commit.assert_not_called()
+    github.publish.assert_not_called()
+    assert failure in github.comment.call_args.args[1]
+    assert len(list(runner.artifacts.iterdir())) == 1
+
+
+@pytest.mark.parametrize("failure", ["no changes produced", "publication failed"])
+def test_repaired_changes_still_require_publication_gates(runtime, failure: str) -> None:
+    from software_factory.sandbox import VerificationFailed
+
+    runner, github, repo, sandbox, _ = runtime
+    sandbox.verify.side_effect = [VerificationFailed("initial failure"), None]
+    if failure == "no changes produced":
+        repo.commit.side_effect = FactoryError(failure)
+    else:
+        github.publish.side_effect = FactoryError(failure)
+    runner.poll_once()
+    assert sandbox.implement.call_count == 2
+    assert sandbox.verify.call_count == 2
+    assert "Failed:" in github.comment.call_args.args[1]
+    assert failure in github.comment.call_args.args[1]
+    assert "Succeeded" not in str(github.comment.call_args_list)
+    assert len(list(runner.artifacts.iterdir())) == 1
+
+
 def test_uncertain_push_is_observed_not_repeated(runtime, caplog) -> None:
     runner, github, repo, _, _ = runtime
     repo.push.side_effect = FactoryError("push failed")
