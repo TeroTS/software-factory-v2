@@ -45,6 +45,16 @@ def test_shared_image_start_has_same_path_socket_and_cooperative_identity(sandbo
     initialize = commands.run.call_args_list[1]
     assert initialize.args[1] == "agent user configuration"
     assert initialize.args[0][:5] == ["docker", "exec", "--user", "0:0", instance.project]
+    script = Path(__file__).resolve().parents[1] / "src/software_factory/sandbox_user_setup.py"
+    assert script.is_file(), "user setup must be a standalone Python script"
+    assert initialize.args[0][5:] == [
+        "/usr/local/bin/python",
+        "-I",
+        "-c",
+        script.read_text(),
+        str(os.getuid()),
+        str(os.getgid()),
+    ]
     assert "HOME=/tmp/factory-home" in args
     assert "XDG_CACHE_HOME=/tmp/factory-home/.cache" in args
     assert instance.base == ["docker", "exec", "--user", str(os.getuid()), "-i", instance.project]
