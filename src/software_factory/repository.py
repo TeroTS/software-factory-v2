@@ -1,4 +1,4 @@
-# Keep host Git metadata outside the sandbox workspace and publish through trusted configuration only.
+# Keep trusted host Git metadata outside the ordinary agent mount; engine access can still bypass this separation.
 import os
 from pathlib import Path
 

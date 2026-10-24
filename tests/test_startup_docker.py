@@ -109,10 +109,7 @@ def test_startup_rejects_broken_required_tool_and_removes_probe(
     assert list(config.artifacts_dir.iterdir()) == []
 
 
-@pytest.mark.parametrize("queued", [False, True])
-def test_operator_starts_real_cli_with_shared_image_and_observes_read_only_polling(
-    tmp_path: Path, queued: bool
-) -> None:
+def test_operator_starts_real_cli_with_shared_image_and_observes_idle_polling(tmp_path: Path) -> None:
     tools = tmp_path / "tools"
     tools.mkdir()
     marker = tmp_path / "github-calls"
@@ -125,7 +122,7 @@ def test_operator_starts_real_cli_with_shared_image_and_observes_read_only_polli
         "if sys.argv[1:3] == ['auth', 'status']: sys.exit(0)\n"
         "assert '--method' in sys.argv and sys.argv[sys.argv.index('--method') + 1] == 'GET'\n"
         "assert any('issues?state=open&labels=' in arg for arg in sys.argv)\n"
-        f"print(json.dumps([[{{'number': 17}}]] if {queued!r} else [[]]))\n"
+        "print(json.dumps([[]]))\n"
     )
     gh.chmod(0o755)
     pi = tools / "pi"
@@ -153,7 +150,7 @@ def test_operator_starts_real_cli_with_shared_image_and_observes_read_only_polli
             deadline = time.monotonic() + 90
             while time.monotonic() < deadline:
                 text = output.read_text()
-                if ("not claimed" if queued else "execution disabled") in text and marker.exists():
+                if "first-pass execution active" in text and marker.exists():
                     calls = [json.loads(line) for line in marker.read_text().splitlines()]
                     if any(call[0] == "api" for call in calls):
                         break

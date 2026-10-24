@@ -50,7 +50,7 @@ This record supersedes the previous execution-model decisions. It consolidates `
 - One trusted target repository, one runner instance, one issue run at a time, and 30-second polling remain unchanged.
 - Every trigger-labeled issue is attempted without eligibility classification or clarification.
 - The execution environment is one shared, versioned Linux agent image maintained in this factory repository.
-- Native `linux/arm64` is required for the agent and target application/dependency execution. Unsupported architectures fail visibly rather than silently invoking emulation.
+- Native `linux/arm64` is required for the agent and target application/dependency execution. Clarified by the operator-approved wrapper-removal plan: validate the native engine/shared agent image, explicitly request native factory-owned containers, and supply a native target default without intercepting Docker commands. Target scripts must use native-compatible images/tools; explicit platform overrides may invoke engine-supported emulation and are not guaranteed to be rejected. The factory never selects an emulation fallback or substitutes dependencies; actual Docker/setup/verification failures remain visible.
 
 ### UX / Workflow
 

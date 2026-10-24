@@ -4,7 +4,7 @@ Source: [DECISIONS.md](DECISIONS.md)
 
 ## Summary
 - Replace target-specific factory sandboxes with one shared Linux agent image connected to the existing local Docker engine. The autonomous coding factory still turns labeled GitHub issues into verified draft PRs using Pi/Copilot and trusted host publication. Domain names follow [CONTEXT.md](CONTEXT.md).
-- This is the accepted target behavior, not a claim of implementation. Historical US-01–US-03 cover the previous execution model; their recorded acceptance does not establish the Docker-enabled model. US-04–US-07 below are the new backlog. Existing contracts must be updated before implementation.
+- This is the accepted target behavior, not a claim of implementation. Historical US-01–US-03 cover the previous execution model; their recorded acceptance does not establish the Docker-enabled model. US-04–US-07 below are the new backlog. US-04 startup and US-05 first-pass execution are implemented; US-06/US-07 remain deferred. See the current slice for verification evidence.
 - Docker access grants effective engine control and potentially host control. The agent environment is not a security boundary protecting host files, credentials, or other containers. The operator accepts this exposure; normal credential separation remains useful but cannot prevent deliberate Docker-mediated access.
 
 ## Goals
@@ -27,8 +27,8 @@ Source: [DECISIONS.md](DECISIONS.md)
 - A new live Copilot-to-GitHub-PR demonstration as a completion gate. Live authenticated checks require separate approval.
 - Issue comments, attachments, or linked pages as task inputs; separately billed provider fallback.
 
-## Incremental Delivery Constraint
-- During US-04 delivery, the operator approved a temporary pre-claim guard until US-05 is implemented. Validated startup enters read-only polling; discovered issues and direct issue dispatch produce a local execution-unavailable warning without consuming labels, writing GitHub status, creating workspaces, or invoking the old backend. This guard is not the final US-05 issue-processing behavior.
+## Incremental Delivery Status
+- US-05 replaces the operator-approved US-04 temporary pre-claim guard with first-pass execution and publication. Already-labeled issues become eligible on startup; operators must inspect labels before upgrading. Until US-06 lands, a completed verification failure fails the run without repairs. The full fresh manual-requeue acceptance scenario remains US-07 work. No legacy backend is selectable.
 
 ## User Stories
 
@@ -79,7 +79,7 @@ Acceptance criteria:
 - Otherwise claim the issue, record running status, snapshot title/body, and create a fresh workspace from the discovered default branch. Later edits, issue-thread content, attachments, and linked pages do not become run inputs.
 - Start one root agent container per issue run using the session's resolved image, local Docker engine access, and a workspace mount at the same absolute path on host and agent. Normal mounts/environment exclude broader host directories/configuration and GitHub publication credentials, despite Docker access being able to bypass these limits.
 - Run setup → Pi implementation → verification inside that environment. Require executable, deterministic, noninteractive `./scripts/setup` and `./scripts/verify`, with verification aligned to target CI. Setup installs any nonbaseline toolchain prerequisites; missing entrypoints or setup failure fails before Pi runs. Do not invent replacement commands or setup repair.
-- Allow target image builds, ordinary Compose startup, and service-backed checks. Native `linux/arm64` is required for application/dependency execution; unsupported images/tools fail visibly instead of silently using AMD64 emulation or replacements.
+- Allow target image builds, ordinary Compose startup, and service-backed checks. Validate a native ARM64 engine/shared agent image, explicitly start factory-owned containers as `linux/arm64`, and supply `DOCKER_DEFAULT_PLATFORM=linux/arm64` to target commands. Target scripts must use native-compatible images/tools; the factory does not intercept Docker commands or guarantee rejection of explicit architecture overrides, which may invoke engine-supported emulation. Actual Docker/setup/verification failures remain visible; the factory never selects an emulation fallback or substitutes dependencies.
 - Use explicit test service addresses: Compose DNS when the agent joins the relevant network, or the Docker host address for published ports. Sibling containers do not share the agent's localhost; transparent forwarding is not required.
 - Preserve exact-model Copilot invocation, stdin-only bearer delivery, validated endpoint metadata, temporary configuration, disabled discovered resources, and nonpersistent sessions. Keep broader host Pi settings, refresh credentials, and GitHub write credentials out of normal agent inputs; never fall back to another billing provider.
 - All phases, including workspace preparation, installation/builds, execution, checks, and publication, share one original 900-second deadline. Expiry stops work and fails the run; do not deliberately continue publication after expiry. Bounded cleanup is still required after expiry or interruption.

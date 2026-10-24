@@ -9,16 +9,16 @@ resource-ownership identifiers defined in Contract 7 during contract generation.
 
 These are target contracts, not acceptance evidence. They supersede the
 prepared-target Compose execution contract. US-04 implements the startup portions
-with the temporary guard below; execution remains deferred to US-05–US-07.
+and US-05 implements first-pass execution/publication; US-06/US-07 remain deferred.
 There is no selectable old backend. Historical US-01–US-03 acceptance does not
 prove the new execution boundaries. See the current slice for verification.
 
-US-04 interim delivery: the operator approved a temporary pre-claim guard until
-US-05 lands. Startup enters read-only polling, while discovery/direct dispatch
-leaves trigger labels, GitHub status, branches/PRs, and existing diagnostics
-unchanged and reports unavailable execution locally. The old backend is not
-selectable. Contracts 2–8 describe the target execution, not acceptance of this
-guarded interim state.
+Incremental delivery: US-05 removes the operator-approved US-04 pre-claim guard.
+Already-labeled issues become eligible; inspect labels before upgrading. Execution
+currently stops on first-pass verification failure without repair. Contract 4's
+recovery and Contract 6's full manual-requeue scenario remain US-06/US-07 work.
+The old backend is not selectable. Contracts define accepted behavior; the current
+slice records verification evidence rather than assuming every future story is done.
 
 Constants are not configuration options: one repository and runner instance,
 one issue run at a time, 30-second polling, a 900-second issue-run deadline,
@@ -148,7 +148,11 @@ and at most three verification repairs after initial implementation.
     workspace files must survive success and failure.
   - Supported engine: local Linux-container engine running native ARM64,
     including an Apple Silicon Mac's Docker Desktop/Rancher Desktop provider.
-    No remote engine, additional factory-managed VM, or AMD64 emulation.
+    No remote engine, additional factory-managed VM, or factory-selected emulation
+    fallback. Startup validates the native engine/shared agent image; factory-owned
+    containers explicitly request `--platform linux/arm64` and `--pull=never`.
+    Target commands inherit `DOCKER_DEFAULT_PLATFORM=linux/arm64`, not Docker
+    command interception or guaranteed rejection of explicit platform overrides.
   - Pi invocation: one-shot print interface, explicit configured
     `github-copilot` model, coding tools, and nonpersistent sessions. Each call
     receives the same immutable snapshot and current workspace; repairs also
@@ -178,7 +182,7 @@ and at most three verification repairs after initial implementation.
   workspace mounts nor credential separation enforce isolation against deliberate
   Docker-authorized commands. Do not claim the old sandbox guarantees remain.
 - Failure / Retry expectations: Missing runtime, unusable workspace/socket,
-  unsupported architecture, provider rejection, expired/malformed credentials,
+  incompatible engine/shared agent image, provider rejection, expired/malformed credentials,
   unsupported endpoint, termination, or deadline expiry fails visibly without
   provider fallback or setup repair. Attempt bounded cleanup under Contract 7;
   these failures do not authorize verification repair cycles.
@@ -362,9 +366,13 @@ and at most three verification repairs after initial implementation.
 - Trigger / Direction: Setup/agent/verification commands build/start services and
   run checks through the local engine during an issue run.
 - Payload / Shape:
-  - Target application/dependency images and execution must be native
-    `linux/arm64`. Unsupported images/tools produce visible failure, not silent
-    AMD64 emulation or substitutions.
+  - Target scripts must use native-compatible `linux/arm64` images/tools.
+    The factory validates a native ARM64 engine/shared agent image, explicitly
+    starts its own containers as `linux/arm64`, and supplies
+    `DOCKER_DEFAULT_PLATFORM=linux/arm64` to target commands. It does not intercept
+    Docker commands or guarantee rejection of explicit architecture overrides;
+    overrides may invoke emulation if the operator's engine supports it.
+    The factory never selects an emulation fallback or substitutes dependencies.
   - Same-absolute-path workspace mounts allow sibling containers to resolve
     relative workspace bind mounts to the intended host path. Do not assume
     `/workspace` or reuse host macOS `.venv`/`node_modules` as Linux dependencies.
@@ -388,18 +396,19 @@ and at most three verification repairs after initial implementation.
   prevent destructive Docker commands.
 - Failure / Retry expectations: Missing native dependencies, invalid mounts,
   file-ownership problems, service startup/readiness errors, or unreachable test
-  endpoints fail visibly. Do not silently use emulation, replace dependencies,
-  reset the deadline, or expand cleanup scope. Only completed canonical verification
+  endpoints fail visibly. Actual Docker/setup/verification failures are not retried
+  with a different architecture or replacement dependencies. Do not reset the
+  deadline or expand cleanup scope. Only completed canonical verification
   failures authorize the bounded repair flow in Contract 4.
 
 ## Slice Handoff
 
 - Contract artifacts implementers must read:
   - `docs/contracts.md`
-- US-04 delivers guarded shared-image startup; consult `docs/slices/current-slice.md`
-  for its evidence. Next story: US-05. Replace the temporary pre-claim guard only
-  when the Docker-enabled execution/publication path is implemented and tested.
-  List these contracts under `## Contract Inputs` when planning that slice.
+- US-04 delivers shared-image startup and US-05 replaces its temporary guard with
+  first-pass Docker-enabled execution/publication. Consult `docs/slices/current-slice.md`
+  for evidence. Next story: US-06 recovery, followed by US-07 manual requeue.
+  List these contracts under `## Contract Inputs` for each story.
 - Story mapping: US-04 uses Contracts 1 and 3 plus startup portions of Contract 6;
   US-05 uses all contracts; US-06 additionally exercises Contract 4 recovery;
   US-07 exercises Contract 6 fresh requeue with all inherited execution gates.

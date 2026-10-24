@@ -5,201 +5,187 @@ from unittest.mock import Mock
 
 import pytest
 
+from software_factory.process import FactoryError
+from software_factory.sandbox import PI_FLAGS, Sandbox, VerificationFailed, copilot_endpoint
 
-def compose(workspace: Path) -> dict:
-    return {
-        "name": "operator-name",
-        "services": {
-            "agent": {
-                "image": "node:24-bookworm-slim",
-                "working_dir": "/workspace",
-                "volumes": [{"type": "bind", "source": str(workspace), "target": "/workspace"}],
-            },
-            "db": {"image": "postgres:17", "environment": {"POSTGRES_PASSWORD": "local-test"}},
-        },
-    }
+IMAGE = "sha256:" + "a" * 64
 
 
-def test_compose_preserves_dependencies_but_controls_lifecycle(tmp_path: Path) -> None:
-    from software_factory.sandbox import prepare_compose
-
-    original = compose(tmp_path)
-    original["services"]["agent"]["depends_on"] = {"db": {"condition": "service_started", "required": True}}
-    result = prepare_compose(original, "agent", tmp_path)
-    assert "name" not in result
-    assert result["services"]["db"]["image"] == "postgres:17"
-    assert result["services"]["agent"]["entrypoint"] == ["sleep", "infinity"]
-    assert result["services"]["agent"]["command"] == []
-    for service in result["services"].values():
-        assert service["restart"] == "no"
-        assert service["cap_drop"] == ["ALL"]
-        assert service["security_opt"] == ["no-new-privileges:true"]
-    assert original["services"]["agent"].get("entrypoint") is None
-
-
-@pytest.mark.parametrize(
-    "patch",
-    [
-        {"privileged": True},
-        {"pid": "host"},
-        {"ipc": "host"},
-        {"network_mode": "host"},
-        {"devices": ["/dev/kvm"]},
-        {"cap_add": ["SYS_ADMIN"]},
-        {"volumes_from": ["other"]},
-        {"build": {"context": "."}},
-        {"container_name": "shared"},
-        {"ports": ["5432:5432"]},
-        {"environment": {"GH_TOKEN": "secret"}},
-        {"environment": {"OPENAI_API_KEY": "secret"}},
-        {"environment": {"PI_CODING_AGENT_DIR": "/workspace/.pi"}},
-        {"volumes": [{"type": "bind", "source": "/var/run/docker.sock", "target": "/sock"}]},
-        {"volumes": [{"type": "bind", "source": "/etc", "target": "/host"}]},
-        {"volumes": [{"type": "volume", "source": "shared", "target": "/data"}]},
-        {"security_opt": ["seccomp:unconfined"]},
-        {"cgroup": "host"},
-        {"restart": "always"},
-        {"use_api_socket": True},
-    ],
-)
-@pytest.mark.parametrize("service", ["agent", "db"])
-def test_rejects_isolation_bypasses_in_every_service(tmp_path: Path, patch: dict, service: str) -> None:
-    from software_factory.process import FactoryError
-    from software_factory.sandbox import prepare_compose
-
-    data = compose(tmp_path)
-    data["services"][service].update(patch)
-    with pytest.raises(FactoryError, match="Compose"):
-        prepare_compose(data, "agent", tmp_path)
-
-
-@pytest.mark.parametrize(
-    "top",
-    [
-        {"secrets": {"auth": {"file": "/secret"}}},
-        {"volumes": {"data": {"external": True}}},
-        {"networks": {"default": {"external": True}}},
-        {"networks": {"default": {"driver": "host"}}},
-    ],
-)
-def test_rejects_external_resources(tmp_path: Path, top: dict) -> None:
-    from software_factory.process import FactoryError
-    from software_factory.sandbox import prepare_compose
-
-    data = compose(tmp_path)
-    data.update(top)
-    with pytest.raises(FactoryError, match="Compose"):
-        prepare_compose(data, "agent", tmp_path)
-
-
-def test_requires_agent_and_workspace(tmp_path: Path) -> None:
-    from software_factory.process import FactoryError
-    from software_factory.sandbox import prepare_compose
-
-    for service in ["missing", "db"]:
-        with pytest.raises(FactoryError):
-            prepare_compose(compose(tmp_path), service, tmp_path)
-
-
-def test_ephemeral_anonymous_volumes_and_bridge_networks(tmp_path: Path) -> None:
-    from software_factory.sandbox import prepare_compose
-
-    data = compose(tmp_path)
-    data["services"]["db"]["volumes"] = [{"type": "volume", "target": "/var/lib/postgresql/data"}]
-    data["networks"] = {"default": {"name": "old_default", "ipam": {"driver": "default", "config": []}}}
-    result = prepare_compose(data, "agent", tmp_path)
-    assert "name" not in result["networks"]["default"]
-
-
-def test_sandbox_runs_commands_with_snapshot_and_secret_only_on_stdin(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    from software_factory.sandbox import PI_FLAGS, Sandbox
-
+@pytest.fixture
+def sandbox(tmp_path: Path):
     commands = Mock()
-    commands.run.return_value = "\nFACTORY_VERIFY_EXIT=0\n"
-    sandbox = Sandbox(prepared_compose=compose(tmp_path), service="agent", directory=tmp_path, commands=commands)
-    sandbox.start()
-    sandbox.setup()
-    sandbox.implement(
-        {"number": 3, "title": "$(touch /host)", "body": "request"},
-        "private-token-value",
-        "https://api.business.githubcopilot.com",
-        "model",
-    )
-    sandbox.verify()
-    cleanup = Mock()
-    monkeypatch.setattr("software_factory.sandbox.Commands", Mock(return_value=cleanup))
-    sandbox.stop()
-    assert "down" in cleanup.run.call_args.args[0]
+    commands.secrets = ["private-bearer"]
+    commands.log = tmp_path / "run.log"
+    commands.run.return_value = ""
+    instance = Sandbox(IMAGE, "unix:///local/docker.sock", tmp_path, commands)
+    return instance, commands
+
+
+def test_shared_image_start_has_same_path_socket_and_cooperative_identity(sandbox, monkeypatch) -> None:
+    instance, commands = sandbox
+    monkeypatch.setenv("GH_TOKEN", "host-secret")
+    instance.start()
+    start = next(call for call in commands.run.call_args_list if call.args[1] == "agent startup")
+    args = start.args[0]
+    assert IMAGE in args
+    assert args[args.index("--platform") + 1] == "linux/arm64"
+    assert args[args.index("--user") + 1] == "0:0"
+    workspace = str(instance.directory / "workspace")
+    assert f"type=bind,src={workspace},dst={workspace}" in args
+    assert f"type=bind,src={instance.socket_path},dst=/var/run/docker.sock" in args
+    assert f"FACTORY_RUN_ID={instance.project}" in args
+    assert f"COMPOSE_PROJECT_NAME={instance.project}" in args
+    assert "DOCKER_DEFAULT_PLATFORM=linux/arm64" in args
+    assert f"software-factory.run-id={instance.project}" in args
+    assert "GH_TOKEN" not in start.kwargs["env"]
+    assert "host-secret" not in " ".join(args)
+    assert "--pull=never" in args
+    commands.run.assert_called_once()  # startup must not rewrite the image's Docker executable
+
+
+@pytest.mark.parametrize("platform,expected", [("darwin", "/var/run/docker.sock"), ("linux", "/local/docker.sock")])
+def test_socket_mount_uses_daemon_path_not_desktop_host_proxy(tmp_path, monkeypatch, platform, expected) -> None:
+    monkeypatch.setattr("software_factory.sandbox.sys.platform", platform)
+    instance = Sandbox(IMAGE, "unix:///local/docker.sock", tmp_path, Mock())
+    assert instance.socket_path == expected
+
+
+def test_setup_implementation_and_verification_stay_inside_agent(sandbox) -> None:
+    instance, commands = sandbox
+    instance.setup()
+    instance.implement({"number": 3, "title": "$(touch /host)", "body": None}, "private-bearer", "endpoint", "model")
+    commands.run.return_value = "checks passed\nFACTORY_VERIFY_EXIT=0\n"
+    instance.verify()
     calls = commands.run.call_args_list
-    phases = [call.args[1] for call in calls]
-    assert phases == ["sandbox startup", "required entrypoints", "setup", "implementation", "verification"]
-    implementation = calls[3]
-    assert "private-token-value" not in " ".join(implementation.args[0])
+    assert [call.args[1] for call in calls] == ["required entrypoints", "setup", "implementation", "verification"]
+    for call in calls:
+        assert call.args[0][:4] == ["docker", "exec", "-i", instance.project]
+    assert calls[1].args[0][-1] == "./scripts/setup"
+    implementation = calls[2]
+    assert "private-bearer" not in " ".join(implementation.args[0])
     payload = json.loads(implementation.kwargs["input"])
     assert payload["snapshot"]["title"] == "$(touch /host)"
     assert payload["flags"] == PI_FLAGS
-    assert calls[2].args[0][-1] == "./scripts/setup"
-    assert "./scripts/verify" in calls[4].args[0][-1]
-    assert (tmp_path / "compose.json").exists()
+    assert payload["bearer"] == "private-bearer"
 
 
-def test_failed_verification_supplies_redacted_stdout_and_stderr_for_repair(tmp_path: Path) -> None:
-    from software_factory.sandbox import Sandbox, VerificationFailed
-
-    commands = Mock()
-    commands.secrets = ["private-bearer"]
+def test_failed_verification_preserves_redacted_feedback(sandbox) -> None:
+    instance, commands = sandbox
     commands.run.return_value = "failed assertion\nprivate-bearer on stderr\n\nFACTORY_VERIFY_EXIT=8\n"
-    sandbox = Sandbox(compose(tmp_path), "agent", tmp_path, commands)
     with pytest.raises(VerificationFailed) as failure:
-        sandbox.verify()
+        instance.verify()
     assert failure.value.output == "failed assertion\n[REDACTED] on stderr\n"
-    assert "failed assertion" not in str(failure.value)
-    assert "private-bearer" not in str(failure.value)
-    sandbox.implement({"number": 1}, "private-bearer", "endpoint", "model", verification_output=failure.value.output)
-    payload = json.loads(commands.run.call_args.kwargs["input"])
-    assert payload["verification_output"] == failure.value.output
-    assert commands.run.call_args.args[1] == "repair"
-    assert failure.value.output not in " ".join(commands.run.call_args.args[0])
+    assert str(failure.value) == "verification failed"
+    instance.implement({}, "private-bearer", "endpoint", "model", verification_output=failure.value.output)
+    assert json.loads(commands.run.call_args.kwargs["input"])["verification_output"] == failure.value.output
 
 
-@pytest.mark.parametrize(
-    "result",
-    [
-        "",
-        "partial output",
-        "\nFACTORY_VERIFY_EXIT=not-a-number\n",
-        "\nFACTORY_VERIFY_EXIT=256\n",
-    ],
-)
-def test_incomplete_verification_result_is_not_a_repairable_failure(tmp_path: Path, result: str) -> None:
-    from software_factory.process import FactoryError
-    from software_factory.sandbox import Sandbox, VerificationFailed
-
-    commands = Mock()
+@pytest.mark.parametrize("result", ["", "partial output", "\nFACTORY_VERIFY_EXIT=bad\n", "\nFACTORY_VERIFY_EXIT=256\n"])
+def test_incomplete_verification_is_not_completed_failure(sandbox, result) -> None:
+    instance, commands = sandbox
     commands.run.return_value = result
-    commands.secrets = []
-    sandbox = Sandbox(compose(tmp_path), "agent", tmp_path, commands)
     with pytest.raises(FactoryError) as failure:
-        sandbox.verify()
+        instance.verify()
     assert not isinstance(failure.value, VerificationFailed)
+
+
+def test_cleanup_uses_exact_labels_not_agent_compose_and_separate_budget(sandbox, monkeypatch) -> None:
+    instance, commands = sandbox
+    cleanup = Mock()
+    cleanup.run.side_effect = lambda args, phase, **kwargs: (
+        {"container": "container-id\n", "network": "network-id\n", "volume": "volume-name\n"}.get(args[1], "")
+        if "ls" in args
+        else ""
+    )
+    factory = Mock(return_value=cleanup)
+    monkeypatch.setattr("software_factory.sandbox.Commands", factory)
+    instance.stop()
+    assert factory.call_args.kwargs["deadline"] > time.monotonic()
+    assert factory.call_args.kwargs.get("log") is None  # broken diagnostic storage must not prevent engine cleanup
+    assert cleanup.secrets == commands.secrets
+    calls = cleanup.run.call_args_list
+    args = [call.args[0] for call in calls]
+    assert args[0] == ["docker", "container", "rm", "--force", instance.project]
+    lists = [a for a in args if "ls" in a]
+    assert len(lists) == 6
+    assert all(
+        any(
+            f"label={label}={instance.project}" in a
+            for label in ("software-factory.run-id", "com.docker.compose.project")
+        )
+        for a in lists
+    )
+    removals = [a for a in args if "rm" in a and a[-1] in {"container-id", "network-id", "volume-name"}]
+    assert [a[1] for a in removals] == ["container", "network", "volume"]
+    assert not any("compose" in a or "prune" in a for a in args)
+    assert any(call.args[1] == "workspace ownership" for call in calls)
+
+
+@pytest.mark.parametrize("kind,identity", [("container", "a" * 64), ("network", "b" * 64), ("volume", "owned-data")])
+def test_failed_resource_removal_requires_confirmed_absence(sandbox, kind, identity) -> None:
+    instance, _ = sandbox
+    cleanup = Mock()
+    cleanup.run.side_effect = [FactoryError("engine error"), identity + "\n"]
+    with pytest.raises(FactoryError, match="cleanup"):
+        instance.remove(cleanup, kind, identity)
+    assert "absence" in cleanup.run.call_args.args[1]
+    if kind in {"container", "network"}:
+        assert "id=" + identity in cleanup.run.call_args.args[0]
+
+
+@pytest.mark.parametrize("phase", ["agent removal", "discovery", "resource removal", "ownership"])
+def test_cleanup_failure_does_not_claim_success_or_broaden_scope(sandbox, monkeypatch, phase) -> None:
+    instance, _ = sandbox
+    cleanup = Mock()
+    cleanup.run.return_value = ""
+    monkeypatch.setattr("software_factory.sandbox.Commands", Mock(return_value=cleanup))
+    remove = Mock(side_effect=FactoryError("agent removal failed") if phase == "agent removal" else None)
+    if phase == "resource removal":
+        remove.side_effect = [None, FactoryError("resource cleanup failed"), None, None]
+    monkeypatch.setattr(instance, "remove", remove)
+    owned = Mock(side_effect=FactoryError("discovery failed") if phase == "discovery" else [{"c"}, {"n"}, {"v"}])
+    monkeypatch.setattr(instance, "owned", owned)
+    restore = Mock(side_effect=FactoryError("ownership failed") if phase == "ownership" else None)
+    monkeypatch.setattr(instance, "restore_ownership", restore)
+    with pytest.raises(FactoryError):
+        instance.stop()
+    assert owned.call_count == 3
+    if phase != "ownership":
+        restore.assert_not_called()
+
+
+def test_ownership_timeout_still_removes_its_named_helper(sandbox, monkeypatch) -> None:
+    instance, _ = sandbox
+    commands = Mock()
+    commands.run.side_effect = FactoryError("issue-run deadline expired")
+    cleanup = Mock()
+    cleanup.run.return_value = ""
+    monkeypatch.setattr("software_factory.sandbox.Commands", Mock(return_value=cleanup))
+    with pytest.raises(FactoryError, match="deadline"):
+        instance.restore_ownership(commands)
+    assert cleanup.run.call_args.args[0] == ["docker", "container", "rm", "--force", instance.project + "-ownership"]
+    args = commands.run.call_args.args[0]
+    assert "--network" in args and "none" in args
+    assert "docker.sock" not in " ".join(args)
+    assert "chown -h" in " ".join(args)
 
 
 @pytest.mark.parametrize(
     "token",
-    ["", "gho_oauth-token", "proxy-ep=attacker.com;exp=9999999999", "proxy-ep=proxy.business.githubcopilot.com;exp=1"],
+    [
+        "",
+        "gho_refresh",
+        "proxy-ep=attacker.com;exp=9999999999",
+        "proxy-ep=proxy.business.githubcopilot.com;exp=1",
+        pytest.param("proxy-ep=proxy.business.githubcopilot.com;exp=" + "9" * 400, id="overflow-expiry"),
+        pytest.param("proxy-ep=proxy.business.githubcopilot.com;exp=" + "9" * 5000, id="oversized-expiry"),
+    ],
 )
 def test_copilot_metadata_fails_closed(token: str) -> None:
-    from software_factory.process import FactoryError
-    from software_factory.sandbox import copilot_endpoint
-
     with pytest.raises(FactoryError, match="Copilot"):
         copilot_endpoint(token)
 
 
 def test_copilot_endpoint_is_derived_and_lifetime_checked() -> None:
-    from software_factory.sandbox import copilot_endpoint
-
     token = f"tid=test;proxy-ep=proxy.business.githubcopilot.com;exp={int(time.time()) + 1300};sig=test"
     assert copilot_endpoint(token) == "https://api.business.githubcopilot.com"

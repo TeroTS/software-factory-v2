@@ -2,104 +2,113 @@
 
 One operator-owned local Python runner coordinates one trusted target repository.
 GitHub holds durable coordination; no database, broker, HTTP API, or hosted
-application exists.
+application exists. [SPEC](../../SPEC.md) and [contracts](../contracts.md) define
+accepted behavior; the [current slice](../slices/current-slice.md) records evidence.
 
-## Current implementation: US-04
+## Current implementation: US-04 and US-05
 
-The runner validates the new four-field TOML, writable artifact root, host tools
-and authentication, local native ARM64 Docker, a compatible already-local shared
-image, and native root/tool execution. It retains the resolved immutable image ID
-and engine endpoint for the session, then polls every 30 seconds.
-
-An operator-approved temporary pre-claim guard reports discovered issues locally
-without consuming triggers, writing status, creating issue workspaces, executing
-agent work, or publishing. Direct issue dispatch has the same guard. There is no
-legacy execution-backend selector. US-05 will replace the guard with the accepted
-Docker-enabled issue-to-PR behavior.
+Startup validates four-field TOML, artifact-root usability, host authentication,
+local native ARM64 Docker, an already-local shared image, and native root/tool
+execution. It retains the immutable image ID and resolved engine endpoint, removes
+the uniquely named mount/network/credential-free probe, and begins serial polling.
+The temporary pre-claim guard is removed; inspect existing trigger labels before
+starting this version.
 
 ```mermaid
 flowchart LR
-    OP[Operator]
-    CONFIG["Operator TOML<br/>repository / model / agent_image / artifacts_dir"]
-    BUILD["Explicit operator image build<br/>agent/Dockerfile"]
-    RUN["Python runner<br/>startup validation + 30s read-only polling"]
-    ENGINE["Local native ARM64 Docker engine"]
-    PROBE["Short root/tool probe<br/>no mounts, network, or credentials"]
-    AUTH["Host gh/Pi authentication<br/>private credential validation"]
-    GH["GitHub CLI<br/>issue discovery only after startup"]
-    GUARD["Temporary pre-claim guard<br/>local warning, no writes"]
-    ART["Configured artifact root<br/>writability probe; preserve existing data"]
-
-    OP --> CONFIG
-    OP --> BUILD
-    BUILD --> ENGINE
-    CONFIG --> RUN
-    RUN --> AUTH
-    RUN --> ART
-    RUN -->|"inspect local image; pin immutable ID"| ENGINE
-    ENGINE --> PROBE
-    RUN -->|"remove uniquely named probe before polling"| PROBE
-    RUN --> GH
-    GH --> GUARD
+    OP[Operator] --> CONFIG[Trusted four-field TOML]
+    OP --> BUILD[Explicit shared-image build]
+    BUILD --> ENGINE[Local native ARM64 Docker]
+    CONFIG --> RUN[Python runner: startup + serial polling]
+    RUN <--> GH[Host gh: coordination and draft PR]
+    RUN --> GIT[Trusted host Git metadata]
+    RUN --> ART[Private fresh workspace and logs]
+    RUN --> AGENT[Root shared-image agent]
+    ART -->|same-path workspace only| AGENT
+    AGENT -->|engine socket| ENGINE
+    ENGINE --> SERVICES[Ordinary target Compose and direct resources]
+    AGENT --> WORK[Setup → Pi → verification]
+    RUN --> CLEAN[Host-owned scoped cleanup + file access restoration]
+    CLEAN -->|required before publication| GIT
+    GIT -->|create-only branch| GH
 ```
 
-### Source and test evidence
+### Issue-run ordering
+
+1. Check the exact configured head repository and `factory/issue-<number>` open PR,
+   then remote branch. Confirm trigger removal before skip notification/execution.
+   Preserve existing PRs/branches; never overwrite or delete a remote factory branch.
+2. Create a fresh private run directory/workspace and immutable issue title/body
+   snapshot with the discovered default-branch base commit. One original 900-second
+   deadline includes preparation, builds/installations, execution, required cleanup,
+   and publication. There is no restart/resume state.
+3. Start one root agent from the immutable shared image with a same-absolute-path
+   workspace bind and local engine socket. On macOS the daemon socket mount is
+   `/var/run/docker.sock`; the selected desktop host proxy is only for host commands.
+   Normal inputs exclude trusted Git metadata and host publication credentials.
+4. Require executable setup/verify scripts, run setup, then exact-model Pi with a
+   Copilot-only bearer supplied through stdin and ephemeral nonpersistent config,
+   then canonical verification. Docker transport/missing-script errors are distinct
+   from completed verification failure. This delivery has no repair loop.
+5. Ordinary Compose inherits matching unique `FACTORY_RUN_ID`/`COMPOSE_PROJECT_NAME`;
+   direct resources use `software-factory.run-id`. Factory-owned containers request
+   `--platform linux/arm64` and `--pull=never`; target commands inherit
+   `DOCKER_DEFAULT_PLATFORM=linux/arm64` and use the unmodified image Docker client.
+   Target scripts must use native-compatible images/tools. Explicit platform
+   overrides are not intercepted and may invoke engine-supported emulation; the
+   factory never selects an emulation fallback or substitutes dependencies.
+   Ownership conventions are cooperative, not access controls.
+6. Remove the agent first, independently discover exact owned resource identities,
+   remove owned containers before networks/disposable volumes, and restore host
+   file ownership/access with fixed trusted code in a network-free mount-only helper.
+   No target teardown code executes on the host. Cleanup failure blocks publication.
+7. With passing verification, completed cleanup, remaining time, and nonempty changes,
+   trusted host Git creates the absent branch and gh creates a draft PR containing
+   `Closes #N`. Uncertain writes receive bounded read-only inspection, not retries.
+   Failure status is concise; private failed artifacts remain until operator deletion.
+
+## Source and test evidence
 
 | Boundary | Source | Evidence |
 | --- | --- | --- |
-| Four-field TOML and migration errors | [config.py](../../src/software_factory/config.py) | [config tests](../../tests/test_config.py) |
-| Safe terminal failures and SIGTERM exit 130 | [entrypoint](../../src/software_factory/__main__.py) | [CLI tests](../../tests/test_cli.py), real startup E2E below |
-| Local engine/image validation, immutable session ID, bounded probe cleanup | [runner.py](../../src/software_factory/runner.py) | [startup tests](../../tests/test_startup.py) |
-| Read-only discovery and guarded dispatch | [runner.py](../../src/software_factory/runner.py), [github.py](../../src/software_factory/github.py) | startup guard tests and labeled-issue E2E variant |
-| Pinned native shared baseline | [Dockerfile](../../agent/Dockerfile), [build instructions](../../agent/README.md) | [real image/tool checks](../../tests/test_startup_docker.py) |
-| Real CLI → TOML → Docker probe/cleanup → polling → SIGTERM | CLI and runner | [startup E2E](../../tests/test_startup_docker.py); GitHub and host authentication are scripted, not live acceptance |
-| Development verification | [Makefile](../../Makefile), [ARM64 CI](../../.github/workflows/verify.yml) | Ruff, Python overall line/branch and Node line/branch/function coverage gates ≥80% |
+| Four-field TOML, migration, safe terminal failures | [config](../../src/software_factory/config.py), [CLI](../../src/software_factory/__main__.py) | config/CLI tests |
+| Immutable image, local engine, bounded startup probe | [runner](../../src/software_factory/runner.py) | [startup tests](../../tests/test_startup.py), [real CLI startup](../../tests/test_startup_docker.py) |
+| Exact duplicate/claim/snapshot/status/PR identity | [GitHub](../../src/software_factory/github.py) | GitHub boundary tests and [orchestration tests](../../tests/test_runner.py) |
+| Shared-image execution, private Pi input, scoped cleanup | [agent lifecycle](../../src/software_factory/sandbox.py), [bridge](../../src/software_factory/sandbox_agent.mjs) | [unit tests](../../tests/test_sandbox.py), [real Docker suite](../../tests/test_docker_integration.py), Node bridge coverage |
+| Native startup validation, factory platform flags, target default, original Docker client | [runner](../../src/software_factory/runner.py), [agent lifecycle](../../src/software_factory/sandbox.py) | [startup tests](../../tests/test_startup.py), [unit tests](../../tests/test_sandbox.py), [real Docker suite](../../tests/test_docker_integration.py) |
+| Trusted Git and create-only push | [repository](../../src/software_factory/repository.py) | real local Git boundary tests and [CLI issue E2E](../../tests/test_issue_docker.py) |
+| Deadline/private diagnostics/process termination | [commands](../../src/software_factory/process.py) | real process tests; Docker expiry/SIGTERM checks |
+| Native baseline | [Dockerfile](../../agent/Dockerfile), [image guide](../../agent/README.md) | real native image/tool checks |
+| ARM64 integration/coverage gates | [CI](../../.github/workflows/verify.yml), [Makefile](../../Makefile) | Ruff; Python overall line/branch and Node line/branch/function ≥80% |
 
-## Target execution: US-05–US-07, not yet active
+The issue E2E runs real CLI/TOML/polling, local Git checkout/create-only push,
+shared-image execution, target-specific installation, Docker build/Compose/service
+verification, cleanup, and scripted draft-PR/status responses. A SIGTERM variant
+retains diagnostics without publication. Authentication/Pi/GitHub are scripted,
+not live authenticated acceptance. Obsolete prepared-Compose code/fixtures/live
+harnesses are removed; earlier scenarios remain in git history.
 
-[Contracts](../contracts.md) define the remaining execution path:
+## Deferred outcomes
 
-1. Exact open factory-PR/branch checks, confirmed trigger removal, and immutable
-   issue title/body snapshot; fresh default-branch workspace under one 900-second
-   deadline.
-2. One root agent container from the pinned shared image, with same-absolute-path
-   workspace mount, local engine access, and normal credential separation.
-3. Setup → exact-model Pi/Copilot implementation → canonical verification, with
-   service-backed checks and explicit addresses for sibling services.
-4. Unique run identity and cooperative Compose/direct-Docker ownership labels;
-   host-controlled cleanup of known owned containers, networks, and disposable
-   volumes before publication. Preserve unrelated resources/images/cache.
-5. Host-owned trusted Git metadata, nonempty verified changes, create-only remote
-   branch, draft PR, and concise issue outcome; private failure retention.
-6. US-06 adds bounded recovery using failed verification feedback in the same
-   environment/deadline. US-07 adds fresh explicit manual requeue without recovery
-   from retained diagnostics.
-
-Reusable GitHub, trusted Git, process/deadline, Copilot metadata, Pi bridge, and
-verification-feedback boundaries retain independent tests. Historical Compose
-helpers and their tests are not a selectable backend. Old orchestration/requeue
-regressions are explicitly skipped until ported; US-05 includes their replacement
-and removal audit. Historical live US-01–US-03 acceptance belongs to the previous
-runtime and is preserved in git history, not proof of these new boundaries.
+- US-06: up to three verification repair cycles in the same environment under the
+  unchanged original deadline, including service-backed recovery/exhaustion evidence.
+- US-07: explicit fresh manual requeue after failure/interruption, proving changed
+  inputs/default branch, unique resources, and unchanged previous diagnostics.
 
 ## Trust model and evidence limits
 
-Root plus Docker engine access grants effective engine/host control. The future
-agent environment is not a host-file or credential security boundary. Limited
-ordinary mounts/stdin credentials/trusted Git metadata remain useful but do not
-prevent deliberate Docker-mediated access. Run labels scope cooperative cleanup,
-not access control. Unknown resources and hard-crash leftovers require operator
-inspection, never broad pruning.
+Root plus Docker engine access grants effective engine/host control. Workspace
+mounts, stdin credentials, trusted Git metadata, and resource labels do not protect
+against deliberate engine-mediated access. Cleanup leaves
+unrelated resources, images, cache, and unknown/untracked resources intact. Hard
+crashes and unknown leftovers require operator inspection, never broad pruning.
 
-Local startup tests prove native tool execution and clean polling with scripted
-external boundaries. They do not prove engine socket access from an issue run,
-same-path sibling mounts, host-usable files, application build/Compose/service
-verification, macOS browser connectivity, issue-run cleanup, repairs, requeue, or
-publication. Linux ARM64 CI cannot establish desktop sharing/networking. These
-remain explicit US-05–US-07 checks. No new live authenticated Copilot/GitHub-writing
-demonstration is required or authorized.
+Tests must use explicit service addresses: Compose DNS after network attachment or
+published host ports, not sibling localhost. Real local provider/browser evidence
+is recorded in the current slice; Linux ARM64 CI cannot establish desktop filesystem
+sharing or macOS browser connectivity. No live authenticated Copilot/GitHub-writing
+demonstration is required or implicitly authorized. Human review and independent
+target CI remain mandatory.
 
-See [current slice](../slices/current-slice.md), [workflow](../workflows/issue-to-draft-pr.md),
-and [operator setup](../../README.md#operator-setup). Update the accepted spec and
-contracts before changing interfaces or policy; do not mix old isolation claims
-with Docker access.
+See [workflow](../workflows/issue-to-draft-pr.md) and
+[operator setup](../../README.md#operator-setup).

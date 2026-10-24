@@ -41,7 +41,7 @@ configuration are copied into the image.
 | CA certificates / Linux utilities | Fixed Debian snapshot and base manifest |
 
 The build includes `build-essential`, standard utilities, curl, certificates,
-tar, and unzip. Root execution allows future target setup to install nonbaseline
+tar, and unzip. Root execution allows target setup to install nonbaseline
 tools. Node/npm/npx, Python/uv, and Docker/Compose/buildx are on their standard
 paths. `UV_LINK_MODE=copy` avoids cross-filesystem link assumptions. The image
 leaves uv's Python download policy at its default, so target setup can obtain
@@ -51,7 +51,7 @@ Pins provide a repeatable baseline, not a security-update promise or a complete
 transitive npm lockfile. Review/rebuild with updated pins and rerun native checks
 when changing the baseline. There are no credentials, host authentication mounts,
 Docker daemon, or target-specific dependencies in the image. Runtime engine access
-will grant effective engine/host control in US-05; this image is not an isolation
+grants effective engine/host control during issue execution; this image is not an isolation
 boundary.
 
 ## Verification boundary
@@ -60,8 +60,24 @@ boundary.
 CLI startup-to-polling path against local Docker. Authentication/GitHub are
 scripted, and no issue is claimed. The probe runs without network access, mounts,
 or credentials and is removed before polling. This is not acceptance of
-Docker-enabled issue implementation, socket/mount/network behavior, host file
-ownership, service-backed verification, or publication. Those remain US-05 work.
+Docker-enabled issue execution by itself. The [Docker suite](../tests/test_docker_integration.py)
+and [CLI issue E2E](../tests/test_issue_docker.py) additionally use this image for
+real application builds, ordinary Compose services, same-path sibling mounts,
+socket access, a target-installed tool, host-usable files, and scoped cleanup.
+Pi/authentication/GitHub boundaries are scripted; no live provider request or
+GitHub write is made. Desktop browser evidence is recorded in the current slice,
+not inferred from Linux CI.
 
-See [operator setup](../README.md#operator-setup) for the new TOML and the
-operator-approved temporary pre-claim guard.
+New agents use the image's unmodified Docker executable directly; no runtime
+installation, executable relocation, or image rebuild is needed. Startup validates
+the native engine/shared image. Factory-owned containers explicitly request
+`--platform linux/arm64` and `--pull=never`; target commands inherit
+`DOCKER_DEFAULT_PLATFORM=linux/arm64`. Target scripts must use native-compatible
+images/tools. The factory does not intercept Docker commands or guarantee rejection
+of explicit platform overrides, which may invoke engine-supported emulation.
+Actual Docker/setup/verification failures remain visible without factory-selected
+emulation or replacement dependencies. Existing containers retain their current
+filesystem until removed; this change applies to newly created agents.
+
+See [operator setup](../README.md#operator-setup) for TOML, target preparation,
+resource ownership conventions, and first-pass execution behavior.

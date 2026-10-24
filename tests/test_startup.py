@@ -1,7 +1,7 @@
 import json
 import time
 from pathlib import Path
-from unittest.mock import Mock, call
+from unittest.mock import Mock
 
 import pytest
 
@@ -214,19 +214,17 @@ def test_startup_preserves_previous_artifacts(startup) -> None:
     assert (previous / "run.log").read_text() == "retained private data"
 
 
-def test_polling_and_direct_dispatch_are_guarded_before_any_write(startup, monkeypatch, caplog) -> None:
+def test_validated_runtime_reaches_serial_issue_dispatch(startup, monkeypatch) -> None:
     config, _, _ = startup
     runtime = preflight(config)
     github = Mock()
     github.discover.return_value = [1, 2]
     monkeypatch.setattr("software_factory.runner.GitHub", Mock(return_value=github))
     runner = Runner(config, runtime)
+    dispatch = Mock()
+    monkeypatch.setattr(runner, "process_issue", dispatch)
     runner.poll_once()
-    runner.process_issue(3)
-    assert github.mock_calls == [call.discover()]
-    assert list(config.artifacts_dir.iterdir()) == []
-    assert "US-05" in caplog.text
-    assert "not claimed" in caplog.text
+    assert [call.args for call in dispatch.call_args_list] == [(1,), (2,)]
     assert runner.runtime.image_id == IMAGE_ID
 
 
@@ -241,4 +239,4 @@ def test_runner_polls_every_thirty_seconds_and_survives_discovery_errors(startup
         runner.run()
     assert [call.args for call in sleep.call_args_list] == [(30,), (30,)]
     assert "GitHub unavailable" in caplog.text
-    assert "execution disabled" in caplog.text
+    assert "first-pass execution active" in caplog.text

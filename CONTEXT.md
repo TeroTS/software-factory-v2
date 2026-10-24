@@ -1,8 +1,9 @@
 # Domain Vocabulary
 
 Execution terms reflect the accepted direction in [DECISIONS.md](DECISIONS.md).
-US-04 implements shared-image startup with a temporary pre-claim guard; issue
-execution remains deferred to US-05–US-07. Behavior and interface contracts remain
+US-04 implements shared-image startup; US-05 implements first-pass execution and
+publication. US-06 repairs and US-07 manual-requeue acceptance remain deferred.
+Behavior and interface contracts remain
 in [SPEC.md](SPEC.md) and [docs/contracts.md](docs/contracts.md).
 
 ## Canonical Terms

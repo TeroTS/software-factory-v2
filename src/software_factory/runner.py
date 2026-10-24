@@ -1,4 +1,4 @@
-# Validate shared-image startup and poll read-only until Docker-enabled issue execution lands in US-05.
+# Validate shared-image startup, coordinate serial first-pass issue runs, and publish only after verified cleanup.
 import json
 import logging
 import os
@@ -13,7 +13,8 @@ from pathlib import Path
 from software_factory.config import Config
 from software_factory.github import GitHub
 from software_factory.process import Commands, FactoryError
-from software_factory.sandbox import PI_FLAGS, copilot_endpoint
+from software_factory.repository import Repository
+from software_factory.sandbox import PI_FLAGS, Sandbox, copilot_endpoint
 
 LOGGER = logging.getLogger("software_factory")
 
@@ -159,7 +160,7 @@ def preflight(config: Config) -> AgentRuntime:
 
 # Keep one serial poller with no recovery state; the operator prevents simultaneous runners for this repository.
 class Runner:
-    # Accept validated startup state without preparing any issue workspace or exposing a legacy backend.
+    # Accept immutable startup state; each labeled issue receives a fresh private workspace and execution identity.
     def __init__(self, config: Config, runtime: AgentRuntime) -> None:
         self.config = config
         self.runtime = runtime
@@ -167,7 +168,9 @@ class Runner:
 
     # Poll every 30 seconds, reporting discovery errors and propagating interruption to the terminal entrypoint.
     def run(self) -> None:
-        LOGGER.warning("Polling %s every 30 seconds; issue execution disabled until US-05", self.config.repository)
+        LOGGER.warning(
+            "Polling %s every 30 seconds; Docker-enabled first-pass execution active", self.config.repository
+        )
         while True:
             try:
                 self.poll_once()
@@ -175,12 +178,133 @@ class Runner:
                 LOGGER.error("Polling failed: %s", error)
             time.sleep(30)
 
-    # Discover issues serially without consuming their triggers or interpreting retained artifacts as work.
+    # Discover labeled issues serially; retained diagnostics are never interpreted as resumable work.
     def poll_once(self) -> None:
         github = GitHub(self.config.repository, Commands())
         for number in github.discover():
             self.process_issue(number)
 
-    # Leave all issue/remote/artifact state unchanged until US-05 replaces this operator-approved temporary guard.
+    # Confirm duplicate/claim state, execute one first-pass run, and report failures without restoring the trigger.
     def process_issue(self, number: int) -> None:
-        LOGGER.warning("Issue #%s not claimed: Docker-enabled issue execution is unavailable until US-05", number)
+        commands = Commands(deadline=time.monotonic() + 900)
+        github = GitHub(self.config.repository, commands)
+        claimed = False
+        directory = None
+        try:
+            existing = github.open_pr(number)
+            branch_exists = False if existing else github.branch_exists(number)
+            github.remove_trigger(number)
+            claimed = True
+            if existing or branch_exists:
+                message = (
+                    "Skipped: existing open PR " + existing
+                    if existing
+                    else f"Skipped: factory/issue-{number} already exists; "
+                    "clean up the remote branch and reapply agent:implement"
+                )
+                github.comment(number, message)
+                return
+            directory = Path(tempfile.mkdtemp(prefix=f"issue-{number}-", dir=self.artifacts))
+            commands.log = directory / "run.log"
+            github.comment(number, "Running: implementation started")
+            url = self.execute(number, github, commands, directory)
+            github.comment(number, "Succeeded: " + url)
+        except FactoryError as error:
+            self.report_failure(number, claimed, str(error), directory)
+            return
+        except OSError:
+            self.report_failure(
+                number, claimed, "local filesystem operation failed; inspect private diagnostics", directory
+            )
+            return
+        except KeyboardInterrupt:
+            self.report_failure(number, claimed, "operator interruption", directory)
+            raise
+        if directory is not None:
+            try:
+                shutil.rmtree(directory)
+            except OSError:
+                LOGGER.error("Could not remove successful workspace: %s", directory)
+
+    # Run setup/Pi/verification under one deadline, stop mutators and clean resources, then publish through trusted Git.
+    def execute(self, number: int, github: GitHub, commands: Commands, directory: Path) -> str:
+        snapshot = github.snapshot(number)
+        branch = github.default_branch()
+        repository = Repository(directory, commands)
+        url = f"https://github.com/{self.config.repository}.git"
+        snapshot["base_commit"] = repository.checkout(url, branch)
+        sandbox = Sandbox(self.runtime.image_id, self.runtime.docker_host, directory, commands)
+        LOGGER.warning("Issue #%s run identity %s; private diagnostics %s", number, sandbox.project, directory)
+        failure = None
+        try:
+            sandbox.start()
+            sandbox.setup()
+            bearer = commands.run(
+                [
+                    "pi",
+                    "auth",
+                    "print-bearer-token",
+                    "--provider",
+                    "github-copilot",
+                    "--min-expiry",
+                    "20m",
+                    *PI_FLAGS,
+                    "--no-context-files",
+                    "--offline",
+                ],
+                "Copilot authentication",
+                cwd=directory,
+                private=True,
+            ).strip()
+            commands.secrets.append(bearer)
+            endpoint = copilot_endpoint(bearer)
+            sandbox.implement(snapshot, bearer, endpoint, self.config.model)
+            sandbox.verify()
+        except BaseException as error:
+            # Unexpected failures must not bypass removal of daemon-managed work either.
+            failure = error
+        try:
+            sandbox.stop()
+        except FactoryError, OSError:
+            LOGGER.error("Run cleanup failed; inspect private diagnostics and run-owned resources: %s", directory)
+            if not isinstance(failure, KeyboardInterrupt):
+                raise FactoryError("run cleanup failed; publication blocked") from None
+        if failure is not None:
+            raise failure
+        if commands.deadline is not None and time.monotonic() >= commands.deadline:
+            raise FactoryError("issue-run deadline expired")
+        repository.commit(number)
+        try:
+            repository.push(url, number)
+            return github.publish(number, snapshot["title"], branch)
+        except (FactoryError, OSError) as error:
+            reason = str(error) if isinstance(error, FactoryError) else "publication filesystem operation failed"
+            # Observe uncertain publication once with a separate bounded read budget; never retry a write.
+            observer = GitHub(self.config.repository, Commands(deadline=time.monotonic() + 30))
+            try:
+                existing = observer.open_pr(number)
+                state = (
+                    "observed PR " + existing
+                    if existing
+                    else (
+                        "remote branch exists; operator inspection required"
+                        if observer.branch_exists(number)
+                        else "no remote factory branch observed"
+                    )
+                )
+            except FactoryError, OSError:
+                LOGGER.error("remote publication state could not be checked for issue #%s", number)
+                state = "remote publication state could not be checked; operator inspection required"
+            raise FactoryError(f"{reason}; {state}") from None
+
+    # Report a concise failure with a bounded status-only budget, retaining private diagnostics without raw output.
+    def report_failure(self, number: int, claimed: bool, reason: str, directory: Path | None) -> None:
+        LOGGER.error("Issue #%s failed: %s", number, reason)
+        if directory is not None:
+            LOGGER.error("Retained private diagnostics: %s", directory)
+        if claimed:
+            try:
+                github = GitHub(self.config.repository, Commands(deadline=time.monotonic() + 30))
+                github.comment(number, "Failed: " + reason)
+            except FactoryError, OSError:
+                LOGGER.error("GitHub failure reporting unavailable for issue #%s", number)

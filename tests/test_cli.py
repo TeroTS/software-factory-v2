@@ -43,6 +43,18 @@ def test_startup_filesystem_failure_is_sanitized(monkeypatch: pytest.MonkeyPatch
     assert "private-detail" not in caplog.text
 
 
+def test_cli_startup_factory_error_is_nonzero_and_safe(monkeypatch, caplog) -> None:
+    from software_factory.__main__ import main
+    from software_factory.process import FactoryError
+
+    monkeypatch.setattr("sys.argv", ["software_factory", "--config", "factory.toml"])
+    monkeypatch.setattr(
+        "software_factory.__main__.load_config", Mock(side_effect=FactoryError("invalid configuration"))
+    )
+    assert main() == 1
+    assert "invalid configuration" in caplog.text
+
+
 def test_sigterm_becomes_cleanup_capable_interruption() -> None:
     from software_factory.__main__ import stop
 

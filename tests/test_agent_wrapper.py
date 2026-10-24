@@ -62,6 +62,9 @@ def test_agent_wrapper_uses_ephemeral_credentials_and_exact_model(tmp_path: Path
     assert output["auth"] == {"github-copilot": {"type": "api_key", "key": "private-bearer"}}
     assert output["models"]["providers"]["github-copilot"]["baseUrl"] == payload["endpoint"]
     assert "private-bearer" not in output["prompt"]
+    assert "COMPOSE_PROJECT_NAME" in output["prompt"]
+    assert "software-factory.run-id=$FACTORY_RUN_ID" in output["prompt"]
+    assert "linux/arm64" in output["prompt"]
     if outcome == "repair":
         assert "Repair" in output["prompt"]
         assert payload["verification_output"] in output["prompt"]

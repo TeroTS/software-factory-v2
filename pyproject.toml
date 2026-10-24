@@ -29,8 +29,7 @@ select = ["E", "F", "I", "UP", "B"]
 testpaths = ["tests"]
 addopts = "-ra"
 markers = [
-    "docker: real Docker Compose integration (FACTORY_DOCKER_TESTS=1)",
-    "e2e: writes to GitHub and uses Copilot (explicit operator inputs required)",
+    "docker: real native Docker/Compose and scripted-boundary CLI E2E (FACTORY_DOCKER_TESTS=1)",
 ]
 
 [tool.coverage.run]
