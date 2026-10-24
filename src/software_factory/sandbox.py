@@ -224,23 +224,30 @@ class Sandbox:
         cleanup = Commands(deadline=time.monotonic() + 60)
         cleanup.secrets = self.commands.secrets.copy()
         failures = []
+        containers_stopped = True
         try:
             self.remove(cleanup, "container", self.project)
         except FactoryError as error:
             failures.append(error)
+            containers_stopped = False
         resources = {}
         for kind in ("container", "network", "volume"):
             try:
                 resources[kind] = self.owned(cleanup, kind)
             except FactoryError as error:
                 failures.append(error)
+                if kind == "container":
+                    containers_stopped = False
         for kind, identities in resources.items():
             for identity in sorted(identities):
                 try:
                     self.remove(cleanup, kind, identity)
                 except FactoryError as error:
                     failures.append(error)
-        if not failures:
+                    if kind == "container":
+                        containers_stopped = False
+        # Non-container cleanup errors must not leave retained diagnostics inaccessible once mutators are stopped.
+        if containers_stopped:
             self.restore_ownership(cleanup)
         if failures:
             raise FactoryError("run cleanup failed; inspect run identity " + self.project)

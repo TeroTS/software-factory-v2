@@ -58,7 +58,28 @@ def local_docker_environment(commands: Commands) -> dict[str, str]:
     return env
 
 
-# Validate artifacts, host prerequisites, native local image, and actual tool execution before read-only polling.
+# Resolve a Copilot-only bearer privately from host Pi using the caller's command budget and trusted directory.
+def copilot_bearer(commands: Commands, directory: Path) -> str:
+    return commands.run(
+        [
+            "pi",
+            "auth",
+            "print-bearer-token",
+            "--provider",
+            "github-copilot",
+            "--min-expiry",
+            "20m",
+            *PI_FLAGS,
+            "--no-context-files",
+            "--offline",
+        ],
+        "Copilot authentication",
+        cwd=directory,
+        private=True,
+    ).strip()
+
+
+# Validate artifacts, host prerequisites, native local image, and actual tool execution before polling.
 def preflight(config: Config) -> AgentRuntime:
     try:
         config.artifacts_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -82,23 +103,7 @@ def preflight(config: Config) -> AgentRuntime:
         raise FactoryError("Docker requires a native linux/arm64 local engine; emulation is unsupported") from None
     commands.run(["gh", "auth", "status", "--hostname", "github.com"], "GitHub authentication", private=True)
     with tempfile.TemporaryDirectory(prefix=".startup-auth-", dir=config.artifacts_dir) as directory:
-        bearer = commands.run(
-            [
-                "pi",
-                "auth",
-                "print-bearer-token",
-                "--provider",
-                "github-copilot",
-                "--min-expiry",
-                "20m",
-                *PI_FLAGS,
-                "--no-context-files",
-                "--offline",
-            ],
-            "Copilot authentication",
-            cwd=Path(directory),
-            private=True,
-        ).strip()
+        bearer = copilot_bearer(commands, Path(directory))
         copilot_endpoint(bearer)
     try:
         images = json.loads(commands.run(["docker", "image", "inspect", config.agent_image], "agent image", env=env))
@@ -239,23 +244,7 @@ class Runner:
         try:
             sandbox.start()
             sandbox.setup()
-            bearer = commands.run(
-                [
-                    "pi",
-                    "auth",
-                    "print-bearer-token",
-                    "--provider",
-                    "github-copilot",
-                    "--min-expiry",
-                    "20m",
-                    *PI_FLAGS,
-                    "--no-context-files",
-                    "--offline",
-                ],
-                "Copilot authentication",
-                cwd=directory,
-                private=True,
-            ).strip()
+            bearer = copilot_bearer(commands, directory)
             commands.secrets.append(bearer)
             endpoint = copilot_endpoint(bearer)
             sandbox.implement(snapshot, bearer, endpoint, self.config.model)

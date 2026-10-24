@@ -42,6 +42,8 @@ def test_startup_resolves_local_image_and_checks_execution_without_claims(startu
     assert "GitHub authentication" in phases
     auth = next(call for call in calls if call.args[1] == "Copilot authentication")
     assert auth.kwargs["private"] is True
+    assert auth.kwargs["cwd"].parent == config.artifacts_dir
+    assert auth.kwargs["cwd"].name.startswith(".startup-auth-")
     assert "--no-context-files" in auth.args[0] and "--offline" in auth.args[0]
     assert "agent runtime" in phases
     assert phases[-1] == "startup cleanup"

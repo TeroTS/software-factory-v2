@@ -103,11 +103,20 @@ def test_service_verification_failure_is_completed_private_feedback(sandbox) -> 
     assert (sandbox.workspace / "service-response").read_text() == "before\n"
 
 
-@pytest.mark.parametrize("missing", ["setup", "verify"])
-def test_missing_entrypoint_prevents_setup(sandbox, missing) -> None:
-    (sandbox.workspace / "scripts" / missing).unlink()
+@pytest.mark.parametrize("entrypoint", ["setup", "verify"])
+@pytest.mark.parametrize("invalid", ["missing", "nonexecutable"])
+def test_invalid_entrypoint_prevents_setup(sandbox, entrypoint, invalid) -> None:
+    path = sandbox.workspace / "scripts" / entrypoint
+    if invalid == "missing":
+        path.unlink()
+    else:
+        path.chmod(0o644)
+    setup = sandbox.workspace / "scripts/setup"
+    if setup.exists():
+        setup.write_text(setup.read_text() + "touch setup-ran\n")
     with pytest.raises(FactoryError, match="required entrypoints"):
         sandbox.setup()
+    assert not (sandbox.workspace / "setup-ran").exists()
     assert not sandbox.owned(Commands(), "network")
 
 
@@ -232,8 +241,10 @@ def test_removed_verify_and_stopped_agent_are_not_completed_verification(sandbox
     assert not isinstance(failure.value, VerificationFailed)
 
 
-def test_cleanup_failure_is_visible_when_owned_network_is_still_in_use(sandbox) -> None:
+def test_cleanup_failure_restores_host_access_when_owned_network_is_still_in_use(sandbox) -> None:
     instance = sandbox
+    execute(instance, "sh", "-ec", "printf retained > cleanup-diagnostic; chmod 000 cleanup-diagnostic")
+    private = instance.workspace / "cleanup-diagnostic"
     name = instance.project + "-shared"
     execute(instance, "docker", "network", "create", "--label", f"{RUN_LABEL}={instance.project}", name)
     Commands().run(
@@ -256,5 +267,12 @@ def test_cleanup_failure_is_visible_when_owned_network_is_still_in_use(sandbox) 
     try:
         with pytest.raises(FactoryError, match="cleanup failed"):
             instance.stop()
+        assert private.stat().st_mode & 0o600 == 0o600
+        assert private.stat().st_uid == os.getuid()
+        assert private.stat().st_gid == os.getgid()
+        assert private.read_text() == "retained"
+        private.write_text("host can edit retained diagnostics\n")
+        assert not instance.owned(Commands(), "container")
+        Commands().run(["docker", "container", "inspect", name], "unowned resource preserved", env=instance.env)
     finally:
         Commands().run(["docker", "rm", "--force", name], "unowned resource cleanup", env=instance.env)

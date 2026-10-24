@@ -7,7 +7,7 @@ import pytest
 from software_factory.config import Config
 from software_factory.process import FactoryError
 from software_factory.runner import AgentRuntime, Runner
-from software_factory.sandbox import VerificationFailed
+from software_factory.sandbox import PI_FLAGS, VerificationFailed
 
 
 @pytest.fixture
@@ -70,6 +70,25 @@ def test_first_pass_claim_setup_verify_cleanup_publish_order(runtime) -> None:
     assert github.comment.call_args.args == (1, "Succeeded: https://github.com/owner/repo/pull/3")
     assert list(runner.artifacts.iterdir()) == []
     assert len(commands.secrets) == 1
+    auth = commands.run.call_args
+    assert auth.args == (
+        [
+            "pi",
+            "auth",
+            "print-bearer-token",
+            "--provider",
+            "github-copilot",
+            "--min-expiry",
+            "20m",
+            *PI_FLAGS,
+            "--no-context-files",
+            "--offline",
+        ],
+        "Copilot authentication",
+    )
+    assert auth.kwargs["private"] is True
+    assert auth.kwargs["cwd"].parent == runner.artifacts
+    assert sandbox.implement.call_args.args[1] == commands.secrets[0]
 
 
 @pytest.mark.parametrize("duplicate", ["pr", "branch"])

@@ -133,25 +133,48 @@ def test_failed_resource_removal_requires_confirmed_absence(sandbox, kind, ident
         assert "id=" + identity in cleanup.run.call_args.args[0]
 
 
-@pytest.mark.parametrize("phase", ["agent removal", "discovery", "resource removal", "ownership"])
+@pytest.mark.parametrize(
+    "phase",
+    [
+        "agent removal",
+        "container discovery",
+        "network discovery",
+        "volume discovery",
+        "container removal",
+        "network removal",
+        "volume removal",
+        "ownership",
+    ],
+)
 def test_cleanup_failure_does_not_claim_success_or_broaden_scope(sandbox, monkeypatch, phase) -> None:
     instance, _ = sandbox
     cleanup = Mock()
     cleanup.run.return_value = ""
     monkeypatch.setattr("software_factory.sandbox.Commands", Mock(return_value=cleanup))
-    remove = Mock(side_effect=FactoryError("agent removal failed") if phase == "agent removal" else None)
-    if phase == "resource removal":
-        remove.side_effect = [None, FactoryError("resource cleanup failed"), None, None]
+
+    def remove(commands, kind, identity):
+        current = "agent removal" if identity == instance.project else kind + " removal"
+        if phase == current:
+            raise FactoryError(current + " failed")
+
     monkeypatch.setattr(instance, "remove", remove)
-    owned = Mock(side_effect=FactoryError("discovery failed") if phase == "discovery" else [{"c"}, {"n"}, {"v"}])
+
+    def discover(commands, kind):
+        if phase == kind + " discovery":
+            raise FactoryError(phase + " failed")
+        return {kind + "-id"}
+
+    owned = Mock(side_effect=discover)
     monkeypatch.setattr(instance, "owned", owned)
     restore = Mock(side_effect=FactoryError("ownership failed") if phase == "ownership" else None)
     monkeypatch.setattr(instance, "restore_ownership", restore)
     with pytest.raises(FactoryError):
         instance.stop()
     assert owned.call_count == 3
-    if phase != "ownership":
+    if phase in {"agent removal", "container discovery", "container removal"}:
         restore.assert_not_called()
+    else:
+        restore.assert_called_once_with(cleanup)
 
 
 def test_ownership_timeout_still_removes_its_named_helper(sandbox, monkeypatch) -> None:
