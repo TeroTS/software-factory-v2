@@ -274,11 +274,14 @@ at most three repair attempts after the initial implementation.
 - Contract artifacts implementers must read:
   - `docs/contracts.md`
 - Current implementation: US-01 and US-02 are done with real issue-to-PR and
-  recovery-to-PR evidence, plus automated failure/isolation checks.
-  `docs/slices/current-slice.md` records completed US-02: issue 9 → draft PR 10
-  after one verification failure and one repair, with independent target CI green.
-  US-03 manual-requeue delivery remains deferred. Implementation limits and
-  operator preparation are in `README.md`.
+  recovery-to-PR evidence, plus automated failure/isolation checks. US-02 produced
+  issue 9 → draft PR 10 after one verification failure and one repair, with
+  independent target CI green; evidence is summarized in `README.md` and the
+  completed slice's git history. `docs/slices/current-slice.md` records completed
+  US-03: issue 13 → draft PR 14 after real operator interruption, restart inactivity,
+  and explicit manual requeue with an edited task snapshot. Both independent
+  target CI runs passed. All explicit stories are complete; no next story remains.
+  Implementation limits and operator preparation are in `README.md`.
 - List `docs/contracts.md` under `## Contract Inputs` in
   `docs/slices/current-slice.md` when slice planning creates that file. No slice
   note or implementation is created by this contract-writing step.
@@ -293,4 +296,8 @@ at most three repair attempts after the initial implementation.
   US-02 subsequently passed live acceptance: issue 9 → draft PR 10 after one
   formatting-check failure and one repair; the repeated canonical verification and
   both independent target CI runs passed with 18 tests and 100% coverage. Human
-  review/merge remains external; successful manual-requeue acceptance remains US-03 work.
+  review/merge remains external. US-03 subsequently passed live manual-requeue
+  acceptance: interrupted issue 13 stayed idle across restart, then explicit
+  label reapplication produced draft PR 14 (`d985c29`) from a fresh workspace
+  using the edited request. Both target CI runs passed with 8 tests and 100%
+  coverage. Previous failed diagnostics remain local until operator deletion.

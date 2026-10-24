@@ -2,6 +2,7 @@ import os
 import time
 from pathlib import Path
 from unittest.mock import patch
+from urllib.parse import quote
 
 import pytest
 
@@ -32,6 +33,26 @@ def test_operator_submits_issue_and_observes_linked_validated_draft_pr() -> None
     assert not github.branch_exists(number)
     issue = github.api(f"issues/{number}")
     assert issue["state"] == "open" and "pull_request" not in issue
+    retained = {}
+    expected_snapshot = None
+    previous = None
+    if os.environ.get("FACTORY_E2E_REQUIRE_REQUEUE") == "1":
+        assert not any(label["name"] == "agent:implement" for label in issue["labels"]), (
+            "requeue acceptance must start with an unqueued failed/interrupted issue"
+        )
+        comments = github.api(f"issues/{number}/comments?per_page=100", pages=True)
+        assert any(comment["body"].startswith("Failed:") for page in comments for comment in page), (
+            "requeue acceptance requires an observed prior failed/interrupted run"
+        )
+        previous_input = os.environ.get("FACTORY_E2E_REQUEUE_FROM")
+        assert previous_input, "set FACTORY_E2E_REQUEUE_FROM to the retained failed run directory"
+        previous = Path(previous_input).resolve()
+        assert previous.name.startswith(f"issue-{number}-") and (previous / "workspace").is_dir()
+        assert (previous / "run.log").is_file()
+        retained = {previous / "run.log": (previous / "run.log").read_bytes()}
+        base = github.default_branch()
+        commit = github.api("commits/" + quote(base, safe=""))["sha"]
+        expected_snapshot = {"number": number, "title": issue["title"], "body": issue["body"], "base_commit": commit}
     inspect = ["docker", "ps", "-aq", "--filter", "label=com.docker.compose.project"]
     before = set(Commands().run(inspect, "inspect cleanup").splitlines())
     if not any(label["name"] == "agent:implement" for label in issue["labels"]):
@@ -39,6 +60,15 @@ def test_operator_submits_issue_and_observes_linked_validated_draft_pr() -> None
     runner = Runner(config, prepared)
     verification_results = []
     original_verify = Sandbox.verify
+    original_implement = Sandbox.implement
+    observed_snapshots = []
+
+    def observe_implementation(sandbox, snapshot, *args, **kwargs):
+        if expected_snapshot is not None:
+            assert sandbox.directory.resolve() != previous
+            assert snapshot == expected_snapshot, "requeue did not capture current issue/default-branch inputs"
+            observed_snapshots.append(snapshot.copy())
+        return original_implement(sandbox, snapshot, *args, **kwargs)
 
     def observe_verification(sandbox):
         try:
@@ -49,7 +79,10 @@ def test_operator_submits_issue_and_observes_linked_validated_draft_pr() -> None
         else:
             verification_results.append(True)
 
-    with patch.object(Sandbox, "verify", observe_verification):
+    with (
+        patch.object(Sandbox, "verify", observe_verification),
+        patch.object(Sandbox, "implement", observe_implementation),
+    ):
         for delay in (0, 30, 30):
             time.sleep(delay)
             assert set(github.discover()) <= {number}, "another issue was queued during the dedicated test"
@@ -70,4 +103,8 @@ def test_operator_submits_issue_and_observes_linked_validated_draft_pr() -> None
         assert 2 <= len(verification_results) <= 4 and verification_results == [False] * (
             len(verification_results) - 1
         ) + [True], "repair recovery was not demonstrated; inspect the dedicated issue and PR before another live run"
+    if expected_snapshot is not None:
+        assert observed_snapshots, "no fresh implementation was observed after manual requeue"
+        assert all(path.read_bytes() == content for path, content in retained.items()), "previous artifacts changed"
+        assert (previous / "workspace").is_dir(), "previous failed workspace was removed"
     print(f"Issue https://github.com/{config.repository}/issues/{number} -> draft PR {url}")

@@ -308,6 +308,32 @@ def test_polling_is_serial_and_does_not_resume_artifacts(runtime, monkeypatch: p
     assert old.exists()
 
 
+def test_requeue_preserves_open_pr_and_consumes_trigger_once(runtime) -> None:
+    from software_factory.runner import Runner
+
+    runner, github, repo, sandbox, _ = runtime
+    queued = {"value": True}
+    github.discover.side_effect = lambda: [1] if queued["value"] else []
+    github.remove_trigger.side_effect = lambda number: queued.update(value=False)
+    sandbox.implement.side_effect = FactoryError("provider unavailable")
+    runner.poll_once()
+    previous = next(runner.artifacts.iterdir())
+    github.open_pr.return_value = "https://github.com/owner/repo/pull/3"
+    runner = Runner(runner.config, runner.prepared, runner.artifacts)
+    runner.poll_once()
+    assert github.comment.call_count == 2
+    queued["value"] = True
+    runner.poll_once()
+    assert github.comment.call_args.args == (1, "Skipped: existing open PR https://github.com/owner/repo/pull/3")
+    assert not queued["value"]
+    runner.poll_once()
+    assert github.comment.call_count == 3
+    repo.checkout.assert_called_once()
+    sandbox.implement.assert_called_once()
+    github.publish.assert_not_called()
+    assert list(runner.artifacts.iterdir()) == [previous]
+
+
 def test_startup_checks_tooling_and_resolves_with_sanitized_environment(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

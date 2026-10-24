@@ -7,7 +7,10 @@ draft PRs. **US-01 passed real end-to-end acceptance:**
 **US-02 also passed live acceptance:** [issue 9](https://github.com/TeroTS/factory-smoke-test/issues/9)
 recovered through one repair and produced [draft PR 10](https://github.com/TeroTS/factory-smoke-test/pull/10),
 with both independent target CI runs green.
-Successful manual-requeue delivery (US-03) remains deferred.
+**US-03 passed live manual-requeue acceptance:** [issue 13](https://github.com/TeroTS/factory-smoke-test/issues/13)
+was interrupted, stayed idle across restart, then produced [draft PR 14](https://github.com/TeroTS/factory-smoke-test/pull/14)
+after explicit label reapplication, with both independent target CI runs green.
+All explicit stories in `SPEC.md` are complete.
 See [SPEC.md](SPEC.md), [contracts](docs/contracts.md),
 [current slice](docs/slices/current-slice.md), [domain vocabulary](CONTEXT.md),
 and the [step-by-step issue-to-draft-PR workflow](docs/workflows/issue-to-draft-pr.md).
@@ -153,12 +156,31 @@ remote factory branch without an open PR blocks execution; the operator must ins
 and delete that branch before reapplying the label. Publication failures are never
 blindly retried or force-pushed. Restarting does not restore trigger labels or resume runs.
 
+To manually requeue a failed or interrupted issue:
+
+1. Inspect the issue status and local diagnostics. After a hard crash, inspect and
+   stop/remove any leftover run-owned containers before starting the single runner.
+2. Check `factory/issue-<number>`. A matching open PR is preserved and linked instead
+   of executed. Without an open PR, inspect and delete any remaining remote factory
+   branch yourself; the runner never deletes or overwrites it. A closed PR does not
+   bypass this branch check.
+3. Edit the issue title/body if needed, then explicitly reapply `agent:implement`.
+   If a skip consumed the label, cleanup alone is insufficient: reapply it again.
+4. The next poll captures the current title/body and creates a new workspace from
+   the current default branch, with a new 900-second deadline and up to three
+   repairs. It does not resume the old workspace or Pi session, and leaves previous
+   failed workspaces/logs intact until you delete them.
+
 ## Verification beyond unit tests
 
 Real Docker checks include setup/verification, a local dependency service, isolation,
 missing entrypoints, failure exits, repair feedback/re-verification, bounded runner
-recovery with a scripted agent, deadline termination, and cleanup. These checks do
-not substitute for live Pi/Copilot recovery-to-PR acceptance.
+recovery with a scripted agent, deadline termination, and cleanup. Manual-requeue
+checks combine real local Git with scripted agent/external GitHub boundaries, plus
+real Compose setup/verification for failure and interruption followed by requeue.
+They check restart inactivity, edited inputs, an updated default branch, fresh run
+budgets/repair allowances, orphan-branch blocking, and retained diagnostics. These
+checks do not substitute for live Pi/Copilot recovery/requeue-to-PR acceptance.
 
 A separate opt-in integration check exercises real Pi/Copilot coding in an empty
 isolated workspace; it is **not** the issue-to-PR end-to-end acceptance test:
@@ -194,10 +216,53 @@ passed with 18 tests and 100% line/branch coverage. Exactly one repair was used.
 Both independent [push CI](https://github.com/TeroTS/factory-smoke-test/actions/runs/40081442415)
 and [PR CI](https://github.com/TeroTS/factory-smoke-test/actions/runs/40081445595) passed.
 The issue has its success link, the trigger label is absent, and run-owned containers
-and the successful run directory were removed. PR 10 remains draft for human review;
-no merge or US-03 run was performed. Private evidence is ignored under
-`artifacts/operator/us02-issue-9/`; the [slice note](docs/slices/current-slice.md)
-records the inspected evidence. Do not rerun against issue 9's existing PR.
+and the successful run directory were removed. PR 10 was draft at acceptance;
+it was already non-draft at US-03 preflight and was left unchanged. No merge was performed. Private evidence is ignored under
+`artifacts/operator/us02-issue-9/`; the completed slice note in git history
+records the detailed inspected evidence. Do not rerun against issue 9's existing PR.
+
+For US-03 acceptance, first arrange an operator-approved failed/interrupted run
+on a dedicated issue, with its trigger absent, no open factory PR, and no remaining
+remote factory branch. Inspect/clean up remote branches yourself if necessary.
+Then use the same live test with both additional inputs:
+
+```sh
+FACTORY_E2E_APPROVED=1 FACTORY_E2E_CONFIG=/absolute/path/to/factory.toml \
+  FACTORY_E2E_ISSUE=123 FACTORY_E2E_REQUIRE_REQUEUE=1 \
+  FACTORY_E2E_REQUEUE_FROM=/absolute/path/to/artifacts/issue-123-failed \
+  uv run --frozen pytest tests/test_e2e.py -s
+```
+
+This mode requires a prior `Failed:` issue comment and retained workspace/log,
+then performs one explicit label reapplication. It observes real Pi implementation
+receiving the current title/body and default-branch commit in a different run
+directory, requires a linked validated draft PR, and checks that the previous log
+is unchanged and workspace remains. It does not manufacture an initial failure,
+clean up branches, or automatically retry a claimed failure. Independent target CI
+and human inspection still follow.
+
+The approved US-03 acceptance passed for issue 13 in 87.59 seconds, producing
+[draft PR 14](https://github.com/TeroTS/factory-smoke-test/pull/14) at `d985c29`
+from baseline `44a3e90`. The first real CLI run was stopped with SIGTERM during
+Pi execution (exit 130, recorded as operator interruption). Its source had not yet
+changed. A real 35-second restart produced no new run or status comment. After the
+issue was edited from `--uppercase` to `--lowercase`, explicit label reapplication
+started a different workspace and delivered the updated request without session
+resumption. Canonical verification and both independent
+[push CI](https://github.com/TeroTS/factory-smoke-test/actions/runs/40087578087) and
+[PR CI](https://github.com/TeroTS/factory-smoke-test/actions/runs/40087580186)
+passed with 8 tests and 100% line/branch coverage; no repair was needed.
+The trigger is absent, successful run directory and run-owned containers are gone,
+and the original failed workspace/log remain unchanged until operator deletion.
+Private evidence is ignored under `artifacts/operator/us03-issue-13/`; the
+[current slice](docs/slices/current-slice.md) records the inspected evidence.
+PR 14 remains draft; no merge was performed. Do not rerun against issue 13's PR.
+
+One earlier interruption monitor missed its process, so issue 11 completed normally
+and produced [draft PR 12](https://github.com/TeroTS/factory-smoke-test/pull/12),
+with both target CI runs green. This is not US-03 evidence. That runner was stopped,
+the monitor was corrected and self-checked before using issue 13, and PR 12 was
+preserved for human review rather than closed, overwritten, or requeued.
 
 The approved US-01 issue-to-PR acceptance test passed for issue 7 in 72.83 seconds,
 producing draft PR 8 from baseline `44a3e90`. Both target CI checks passed with
