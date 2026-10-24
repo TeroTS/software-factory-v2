@@ -28,6 +28,7 @@ def test_shared_image_has_pinned_native_baseline_and_no_credentials() -> None:
     assert inspected["Os"] == "linux" and inspected["Architecture"] == "arm64"
     assert inspected["Config"]["User"] in {"", "0", "root"}
     assert not inspected["Config"].get("Volumes")
+    assert not any(variable.startswith("UV_PYTHON_DOWNLOADS=") for variable in inspected["Config"]["Env"])
     assert not any(
         key in variable.split("=", 1)[0].upper()
         for variable in inspected["Config"]["Env"]

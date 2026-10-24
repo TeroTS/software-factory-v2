@@ -31,7 +31,6 @@ RUN printf '%s\n' \
     && npm install --global --ignore-scripts @earendil-works/pi-coding-agent@1.3.0 \
     && npm cache clean --force
 
-ENV UV_LINK_MODE=copy \
-    UV_PYTHON_DOWNLOADS=never
+ENV UV_LINK_MODE=copy
 WORKDIR /tmp
 USER root

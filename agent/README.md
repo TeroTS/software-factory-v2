@@ -43,9 +43,9 @@ configuration are copied into the image.
 The build includes `build-essential`, standard utilities, curl, certificates,
 tar, and unzip. Root execution allows future target setup to install nonbaseline
 tools. Node/npm/npx, Python/uv, and Docker/Compose/buildx are on their standard
-paths. `UV_LINK_MODE=copy` avoids cross-filesystem link assumptions, and
-`UV_PYTHON_DOWNLOADS=never` uses the provided Python unless target setup explicitly
-prepares another toolchain.
+paths. `UV_LINK_MODE=copy` avoids cross-filesystem link assumptions. The image
+leaves uv's Python download policy at its default, so target setup can obtain
+another Python version when required.
 
 Pins provide a repeatable baseline, not a security-update promise or a complete
 transitive npm lockfile. Review/rebuild with updated pins and rerun native checks
