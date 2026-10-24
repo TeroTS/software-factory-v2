@@ -3,74 +3,81 @@
 Status: done
 
 ## Slice Goal
-- Let the operator manually requeue a failed or interrupted issue and receive a validated draft PR from a fresh issue run.
+- Let the operator start a validated runner with one locally built shared agent image, without a target-specific factory sandbox.
 
 ## Slice Boundary
 - Actor: Operator.
-- Trigger: The operator reapplies `agent:implement` after failure or interruption.
-- Action: Request a fresh attempt after any required remote branch cleanup.
-- Visible outcome: A new issue run produces a validated draft PR without resuming the earlier agent session.
-- Authoritative state transition: Failed or interrupted issue awaiting manual requeue → GitHub-recorded successful fresh issue run linked to a draft PR.
-- One retry-to-PR outcome through the existing polling/execution path, including restart inactivity, fresh inputs/workspace, duplicate/branch checks, and retained diagnostics.
+- Trigger: The operator starts the factory for one trusted target repository with operator-owned configuration and a locally built shared agent image.
+- Action: Validate configuration, artifact-root usability, host prerequisites, local Docker execution, and shared-image availability/compatibility, then begin polling.
+- Visible outcome: The runner reaches polling without requiring target-specific factory Compose configuration.
+- Authoritative state transition: Stopped runner with supplied configuration → validated runner polling the configured repository.
+- Prove startup without claiming or processing a real GitHub issue. Issue-to-PR execution and its acceptance belong to US-05.
+- Operator approval in this conversation: use a temporary pre-claim guard until US-05. Polling and direct issue dispatch must leave labels, comments, branches, PRs, and previous diagnostics unchanged; report the unavailable execution capability locally. This is an interim delivery constraint, not the final issue-processing policy.
 
 ## Stories In Scope
-- `US-03 Manually requeue a failed or interrupted issue`
+- `US-04 Start the runner with a shared agent image`
 
 ## Stories Completed In This Slice
-- `US-03 Manually requeue a failed or interrupted issue`
+- `US-04 Start the runner with a shared agent image`
 
 ## Stories Remaining In This Slice
 - None.
 
 ## Contract Inputs
-- `docs/contracts.md`, Contracts 2 and 6: explicit trigger reapplication, fresh snapshot/workspace/budget, no session recovery, repeated duplicate/branch checks, retained failed artifacts.
-- `docs/contracts.md`, Contracts 1 and 3–5: preserve serial execution, isolation, nonpersistent Pi calls, per-run 900-second deadline, three repair attempts, verification and create-only publication gates.
+- `docs/contracts.md`, Contract 1: unchanged CLI invocation; exactly repository/model/agent_image/artifacts_dir; legacy-field rejection; artifact-path resolution; safe startup failures; no automatic migration/build/pull.
+- `docs/contracts.md`, Contract 3 startup portions: factory-maintained pinned shared-image baseline, native local linux/arm64 execution, immutable session image ID, and no baked-in credentials.
+- `docs/contracts.md`, Contract 6 startup portions: private diagnostic root, preservation of existing artifacts, and no restart-triggered recovery.
 
 ## Decision Inputs
-- None.
+- `DECISIONS.md`, Interfaces / Contracts and Operations / Deployment: replace the old backend rather than add a selector; pin the image baseline; reject remote engines/emulation; operator builds the image before startup.
+- `DECISIONS.md`, Interface / Contract Expectations: standing instructions must reflect the approved Docker trust model before production execution changes.
 
 ## Shared State Required Now
-- Existing GitHub trigger label, exact factory PR/branch identity, immutable per-run snapshot, fresh default-branch workspace, deadline, and repair count.
-- Prior local failure artifacts are diagnostics only, never a source of executable recovery state. No new database, checkpoint, configuration, or session state.
+- Validated immutable operator configuration: repository, exact Copilot model, local agent-image reference, and resolved artifact root.
+- One compatible immutable local image ID for the runner session; adopting a rebuilt tag requires restart.
+- Validated local engine/execution prerequisites. Engine access is not a host-security boundary.
+- No new job state, database, recovery checkpoint, backend selector, or automatic configuration migration.
 
 ## Operations / Endpoints / Surfaces In This Slice
-- Existing runner polling, GitHub coordination, fresh checkout, sandbox execution, and publication path. No production-code changes were required.
-- `tests/test_requeue.py` combines real local Git/command budgets with scripted agent and GitHub boundaries; two variants use real Compose setup/verification and cleanup.
-- `tests/test_e2e.py` supports `FACTORY_E2E_REQUIRE_REQUEUE=1` plus `FACTORY_E2E_REQUEUE_FROM=<retained failed run directory>`. It requires prior failure evidence and an absent trigger before explicit reapplication, observes current issue/default-branch inputs in a different run directory, and checks retained diagnostics.
-- Operator approved live US-03 acceptance in this session. Preflight passed against target `main` at `44a3e90e1ebb32909ff085ff6fdbd0902bf4915b`; no trigger-labeled issues or active factory runner were found. PRs 8 and 10 were open and non-draft at preflight (operator changes since their acceptance); they were left unchanged.
-- The first monitor missed the active process, so dedicated issue 11 completed normally and produced draft PR 12 (`3f05dbbda98b58f69f3c51f7361c6e7db468f95b`). This is first-pass success, not US-03 evidence. Both target CI runs passed (40087114159 and 40087116303). The runner was stopped and that PR/branch were preserved, never requeued or deleted. The corrected monitor's child-process self-check passed before a second dedicated issue was created.
+- `src/software_factory/config.py`: replace Compose fields and validation with the four contracted fields, migration diagnostics, and artifact-path resolution.
+- `src/software_factory/runner.py`: replace prepared-Compose startup resolution with artifact-root and local engine/image readiness checks; carry the immutable session image identity into the runner.
+- `src/software_factory/__main__.py`: preserve invocation, safe failure exits, interruption handling, and startup-to-polling ordering.
+- Add the factory-owned shared-image build definition and operator build instructions with exact baseline pins and no credentials.
+- Startup coverage is in `tests/test_config.py`, `tests/test_startup.py`, `tests/test_startup_docker.py`, and `tests/test_cli.py`. Historical runner/requeue/recovery scenarios are explicitly skipped pending ports, not silently adapted to a fake legacy backend. Scripted historical live-harness observation unit tests remain active.
+- Update `README.md`, `AGENTS.md`, vocabulary status, architecture/workflow docs, SPEC, and contracts for the delivered startup interface and approved guard/trust boundary. `agent/Dockerfile` and `agent/README.md` supply the pinned baseline. CI explicitly builds/tests startup on `ubuntu-24.04-arm`; this is not acceptance of US-05 execution.
+- Replace Runner.process_issue's obsolete prepared-Compose orchestration with the approved temporary pre-claim guard. Keep independently tested GitHub, trusted Git, command, credential, and verification-feedback boundaries for reuse in US-05. Historical orchestration tests cannot establish acceptance of the new execution model; retain deferred regression scenarios explicitly until they can be ported.
 
 ## Tests Required
-- Failed and interrupted issues stay unqueued across polling and runner restart until explicit label reapplication.
-- Requeue captures edited title/body, checks out the current default branch into a new workspace, starts a new 900-second budget and repair allowance, and preserves previous failure artifacts.
-- Reapplied triggers repeat open-PR and orphan-branch checks, consume the trigger on skip, and do not repeat notifications without another reapplication. An orphan branch requires operator deletion plus label reapplication.
-- Passed targeted checks: `FACTORY_DOCKER_TESTS=1 uv run --frozen pytest tests/test_requeue.py tests/test_runner.py tests/test_e2e_harness.py -q` — 57 passed, including real local Git plus real Compose failure/interruption-to-requeue cases. Earlier non-Docker run: 5 passed, 2 Docker cases skipped.
-- Passed full CI-equivalent verification: `FACTORY_DOCKER_TESTS=1 FACTORY_E2E_APPROVED=0 FACTORY_COPILOT_TESTS=0 FACTORY_SMOKE_SANDBOX_TESTS=0 ./scripts/verify` — format/lint clean, 211 Python tests passed, 3 explicit-opt-in live checks skipped. Node bridge tests passed with 100% line/branch/function coverage; Python coverage 97.28% (up from US-02's recorded 97.11%). Both 80% gates are unchanged. Repeated after live acceptance/documentation updates with the same results (211 passed in 64.80 seconds; 3 live opt-in checks deliberately disabled in this repeat).
-- Offline harness tests reject stale inputs, workspace reuse, modified logs, and missing prior failure evidence. Local scripted/mocked publication is not presented as live acceptance.
-- Passed real interruption: issue 13's normal CLI run reached Pi implementation, then the operator's controller sent SIGTERM after five seconds. CLI exited 130; GitHub recorded `Failed: operator interruption`; trigger absent; no factory branch or PR; run-owned containers removed. Setup passed and implementation exited -9 in the retained log. Source had not changed before interruption; this was not a partially coded change.
-- Passed real restart inactivity: CLI ran again for 35 seconds (longer than one poll interval), then stopped with SIGTERM/exit 130. No new run directory, comment, trigger, or retained-log change occurred. The operator then edited issue 13's title/body from `--uppercase` to `--lowercase` while it remained unqueued.
-- Passed live requeue acceptance: `uv run --frozen python artifacts/operator/us03-requeue.py` — controller invoked `python -m pytest tests/test_e2e.py -q -s` with `FACTORY_E2E_APPROVED=1`, `FACTORY_E2E_REQUIRE_REQUEUE=1`, `FACTORY_E2E_REQUIRE_REPAIR=0`, issue 13, the operator TOML, and `FACTORY_E2E_REQUEUE_FROM=/Users/terosuhonen/omat/factory-smoke-test/sandbox/agent/artifacts/issue-13-bucn4klp`. Result: 1 passed in 87.59 seconds. Its read-only private monitor copied redacted run logs before successful-run deletion; no runtime operation or external service was replaced or mocked.
-- Inspected real requeue sequence: explicit label reapplication → fresh claim/snapshot/default-branch checkout → Compose setup → Pi/Copilot implementation → canonical verification exit 0 → sandbox cleanup → host commit/create-only push → draft PR → issue success link. No repair was needed in the fresh run. Canonical target verification passed 8 tests with 100% line/branch coverage.
-- Independent target push CI passed: https://github.com/TeroTS/factory-smoke-test/actions/runs/40087578087. Independent target PR CI passed: https://github.com/TeroTS/factory-smoke-test/actions/runs/40087580186. Both verified head `d985c291e19214d2d0431cb33c93cb12937bc40d`, with 8 tests and 100% line/branch coverage.
-- Final cleanup inspection found no test-owned containers or active factory runner. The unrelated stopped `hh-application-v2-postgres-1` container was left untouched. No trigger-labeled issues remained.
-- At live acceptance, factory changes were uncommitted/unpushed; no remote factory CI result was claimed. Full local CI-equivalent verification is recorded above. Live evidence and CI apply to the target PR, not a factory commit. The operator subsequently authorized committing and pushing the completed US-03 changes.
+- Config tests accept exactly four nonempty strings; preserve repository/model semantics; resolve relative and absolute artifact paths independently of the working directory; reject missing, wrong-type, unknown, malformed, and legacy fields with safe migration guidance.
+- Startup tests reject missing tools, failed authentication/engine checks, unsupported/remote engines, unavailable or incompatible local images, and unusable artifact roots before any claim.
+- Check image resolution is local-only, immutable for the session, and never builds/pulls/falls back; check existing diagnostic contents survive startup.
+- Explicit startup E2E: load real TOML through the CLI/startup path, validate the operator-built shared image against real local ARM64 Docker, and observe entry to polling with scripted GitHub/authentication boundaries and no issue processing. Clearly distinguish scripted service boundaries from live authentication acceptance.
+- Build and inspect the shared image locally; exercise its pinned baseline tools and native architecture without Copilot requests or GitHub writes.
+- Run Ruff format check, Ruff lint, Python tests/coverage, and Node bridge coverage using `./scripts/verify`; preserve all existing 80% gates and report unavailable checks honestly.
 
 ## Not Now
-- Automatic retries/requeue, interrupted-session recovery, artifact deletion, branch deletion by the runner, configuration expansion, databases, parallel runners, credential renewal, additional targets, merging, and PR review revisions.
-- US-01 (issue 7 → draft PR 8) and US-02 (issue 9 → draft PR 10 after one verification failure/repair) were already complete. Their detailed evidence is in completed slice git history and summarized in `README.md`; neither PR was modified or merged during this slice.
-- No explicit story follows US-03 in `SPEC.md`; do not infer new delivery work.
+- US-05 issue-to-draft-PR execution: per-run Docker access and same-path mounts, setup/Pi/verification with application services, resource identity and scoped cleanup, host file ownership, publication gates, desktop networking/browser evidence, execution-path removal audit, and Docker-enabled issue-execution acceptance in ARM64 CI.
+- US-06 service-backed verification recovery and US-07 fresh manual requeue in the new environment. Independent GitHub/Git/process/credential/verification-feedback/Pi-bridge logic remains tested; port historical orchestration scenarios from the retained tests and git history instead of retaining the obsolete runner as a selectable backend.
+- No live Copilot request, real GitHub issue processing, label/comment/branch/PR writes, automatic image build/pull by the runner, dependency upgrades outside the required image baseline, automatic migration, or parallel legacy backend.
 
 ## Done When
-- Automated restart/requeue/freshness/duplicate/branch/retention checks and real dependency-backed checks pass with coverage gates intact.
-- Real manual-requeue-to-linked-draft-PR acceptance passes with inspected GitHub state, independent target CI, and cleanup; leave merging to human review.
+- New TOML and the locally built pinned shared image take the real startup path to polling without target-specific factory sandbox configuration or real issue processing.
+- Legacy/invalid configuration, unusable artifacts, engine failures, and missing/incompatible images fail nonzero with safe actionable diagnostics before claims.
+- The session retains a resolved immutable native linux/arm64 image ID, and startup neither builds/pulls images nor modifies earlier artifacts.
+- Startup-to-execution wiring has no obsolete configuration access or hidden compatibility backend; any necessary scope decision has been resolved explicitly.
+- Focused startup E2E, image/tool checks, and relevant verification pass with unchanged coverage gates; documentation accurately states which execution stories remain unimplemented.
 
 ## Completion Summary
-- Operator-approved [issue 13](https://github.com/TeroTS/factory-smoke-test/issues/13) produced [draft PR 14](https://github.com/TeroTS/factory-smoke-test/pull/14), branch `factory/issue-13`, head `d985c291e19214d2d0431cb33c93cb12937bc40d`, from baseline `44a3e90e1ebb32909ff085ff6fdbd0902bf4915b`.
-- The first run was genuinely interrupted during Pi execution; restarting alone did nothing. Explicit manual requeue created a fresh run at `issue-13-n6hvahch`, used the edited `--lowercase` request, passed verification, and linked the draft PR without resuming the earlier workspace/session.
-- Inspected diff contains only README, application code, and meaningful tests: preserved default output/no-argument callable behavior, the requested lowercase flag, invalid-input rejection (including the superseded uppercase flag), and documentation. Verification scripts, dependencies, coverage policy, and sandbox configuration were unchanged.
-- The issue records [interruption failure](https://github.com/TeroTS/factory-smoke-test/issues/13#issuecomment-6383286716), [fresh running status](https://github.com/TeroTS/factory-smoke-test/issues/13#issuecomment-6383310539), and [success with the PR link](https://github.com/TeroTS/factory-smoke-test/issues/13#issuecomment-6383317119). The trigger is absent, successful workspace deleted, and prior failed workspace/log retained unchanged at `/Users/terosuhonen/omat/factory-smoke-test/sandbox/agent/artifacts/issue-13-bucn4klp` until operator deletion.
-- Both target CI runs are green. PR 14 and incidental first-pass PR 12 remain open and draft for human review. No target branch deletion, PR closure/merge, or target default-branch update was performed. Subsequent authorization to commit/push the factory changes does not authorize merging either target PR.
-- Private evidence is ignored under `artifacts/operator/us03-issue-13/`: interruption/restart logs and summary, acceptance log/result, copied redacted requeue log, PR diff, final GitHub state/comments, head-matched CI results/logs, and `summary.json`. The initial unsuccessful interruption monitor's console is under `artifacts/operator/us03-issue-11/`.
+- New four-field TOML and an operator-built shared image reach real CLI polling without target-specific factory Compose input. Legacy input receives migration guidance; invalid prerequisites fail safely before claims. Artifact roots resolve against TOML and previous diagnostics remain untouched.
+- The runner resolves an immutable native linux/arm64 image ID and local engine endpoint once, checks host GitHub/Copilot authentication privately, runs a credential/mount/network-free root/tool probe, and removes that uniquely named probe with bounded cleanup even after failure/interruption. Cleanup failure blocks successful startup; an interruption remains exit 130 even if cleanup also fails.
+- The approved temporary guard replaces old runner orchestration: discovery and direct issue dispatch cannot consume labels, write status/branches/PRs, create issue workspaces, or select the old backend. The runner logs read-only polling every 30 seconds and unavailable execution locally. No US-05/06/07 acceptance is claimed.
+- Added `agent/Dockerfile` and `agent/README.md`: digest-pinned Python/Node/Docker stages, a fixed signed Debian snapshot, exact Pi/uv versions, root execution, and baseline development tools without credentials. CI now uses `ubuntu-24.04-arm`, explicitly builds the shared image, and enables native startup checks. No remote CI run is claimed.
+- Real local build passed: `docker build --platform linux/arm64 -t software-factory-agent:1.0.0 agent`. Built image: `sha256:3a52473d5bb206f9a5b46420c548016280222741602936f30e6b040d29c674f7`, inspected as linux/arm64. Native tool checks passed for Node 22.19.0/npm 10.9.3, Python 3.14.3/uv 0.5.13, Pi 1.3.0, Docker 28.4.0/Compose 2.39.4, and the documented Debian tools.
+- Real startup E2E passed on the local Apple Silicon Rancher Desktop engine (linux/aarch64, local Unix socket). Both idle and labeled-issue variants ran the actual CLI/TOML/image/probe/cleanup/polling path, preserved previous diagnostics, made only scripted GitHub reads, and exited 130 on SIGTERM. Authentication and GitHub were scripted; no live Copilot/GitHub request or GitHub write was performed. Final inspection found no `factory-startup-*` containers.
+- Test-first evidence: configuration/startup tests failed against the old runtime (37 failures), then passed after implementation. Shared-image checks failed before the new image existed, then passed after its explicit build. Additional authentication and interruption-plus-cleanup regressions were observed failing before their fixes.
+- Full local CI-equivalent command passed: `FACTORY_DOCKER_TESTS=1 FACTORY_AGENT_IMAGE_TESTS=1 FACTORY_E2E_APPROVED=0 FACTORY_COPILOT_TESTS=0 FACTORY_SMOKE_SANDBOX_TESTS=0 ./scripts/verify`. Ruff format/lint clean; 241 Python tests passed, 52 skipped; Python overall line/branch coverage 97.79% (previous recorded 97.28%, with different source scope after removing obsolete runner orchestration). Node bridge tests passed with 100% line/branch/function coverage. All 80% gates remain unchanged; no business logic coverage exclusions were added.
+- Skip accounting: 37 historical runner cases, 7 historical requeue cases, and 4 historical recovery-orchestration cases await ports in US-05–US-07; 3 historical live issue/smoke cases are disabled; 1 separate live Copilot probe was deliberately not enabled. Independent real Git/process, GitHub, credential, Pi-bridge, verification-feedback, and historical Compose-helper checks remain active. The latter prove only those helpers, not a new execution backend.
+- CLI help passed without polling. `git diff --check` and local documentation path/anchor/format checks passed. No new type checker/Markdown linter is configured. No service-backed issue execution, socket/sibling-mount/file-ownership/network/browser/issue-cleanup acceptance, live provider/model request, or remote CI was run; those checks are outside this startup slice.
 
 ## Next Slice Recommendation
-- No explicit next story remains in `SPEC.md`; US-01, US-02, and US-03 are complete. Stop implementation unless the operator explicitly requests additional work.
+- `US-05 Turn a labeled issue into a Docker-verified draft PR`: replace the temporary guard with one real Docker-enabled execution/publication path and complete its ownership/cleanup/trust-boundary/removal audit and desktop-provider evidence. Keep US-06 verification recovery and US-07 fresh manual requeue in view, but do not expand the next slice to include their outcomes.

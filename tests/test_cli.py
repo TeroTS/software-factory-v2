@@ -12,13 +12,14 @@ def test_cli_starts_preflight_then_polling(tmp_path: Path, monkeypatch: pytest.M
     runner = Mock()
     monkeypatch.setattr("sys.argv", ["software_factory", "--config", str(tmp_path / "factory.toml")])
     monkeypatch.setattr("software_factory.__main__.load_config", Mock(return_value=config))
-    preflight = Mock(return_value={"services": {}})
+    runtime = Mock(image_id="sha256:resolved", docker_host="unix:///var/run/docker.sock")
+    preflight = Mock(return_value=runtime)
     monkeypatch.setattr("software_factory.__main__.preflight", preflight)
     constructor = Mock(return_value=runner)
     monkeypatch.setattr("software_factory.__main__.Runner", constructor)
     assert main() == 0
     preflight.assert_called_once_with(config)
-    constructor.assert_called_once_with(config, {"services": {}})
+    constructor.assert_called_once_with(config, runtime)
     runner.run.assert_called_once()
 
 

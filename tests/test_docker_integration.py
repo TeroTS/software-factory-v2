@@ -152,6 +152,7 @@ def test_container_failure_is_not_repairable_verification(sandbox) -> None:
     assert not isinstance(failure.value, VerificationFailed)
 
 
+@pytest.mark.skip(reason="prepared-Compose runner removed; port recovery orchestration to US-06")
 @pytest.mark.parametrize("outcome", ["success", "exhausted", "repair-timeout", "verify-timeout"])
 def test_runner_recovery_with_real_compose_and_shared_command_deadline(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, outcome: str

@@ -7,11 +7,18 @@ using [DECISIONS.md](../DECISIONS.md) for locked policy and
 [CONTEXT.md](../CONTEXT.md) for naming. The operator additionally approved the
 resource-ownership identifiers defined in Contract 7 during contract generation.
 
-These are target contracts, not implementation or acceptance evidence. They
-supersede the prepared-target Compose execution contract. The current runtime
-and operator instructions still describe the old execution model; implementation
-must update them without retaining a second backend. Historical US-01–US-03
-acceptance does not prove these new execution boundaries.
+These are target contracts, not acceptance evidence. They supersede the
+prepared-target Compose execution contract. US-04 implements the startup portions
+with the temporary guard below; execution remains deferred to US-05–US-07.
+There is no selectable old backend. Historical US-01–US-03 acceptance does not
+prove the new execution boundaries. See the current slice for verification.
+
+US-04 interim delivery: the operator approved a temporary pre-claim guard until
+US-05 lands. Startup enters read-only polling, while discovery/direct dispatch
+leaves trigger labels, GitHub status, branches/PRs, and existing diagnostics
+unchanged and reports unavailable execution locally. The old backend is not
+selectable. Contracts 2–8 describe the target execution, not acceptance of this
+guarded interim state.
 
 Constants are not configuration options: one repository and runner instance,
 one issue run at a time, 30-second polling, a 900-second issue-run deadline,
@@ -389,9 +396,10 @@ and at most three verification repairs after initial implementation.
 
 - Contract artifacts implementers must read:
   - `docs/contracts.md`
-- Next step: `$lean-story-delivery`, starting with US-04. List `docs/contracts.md`
-  under `## Contract Inputs` in `docs/slices/current-slice.md` when planning starts.
-  This step does not modify slice notes or implement the new execution path.
+- US-04 delivers guarded shared-image startup; consult `docs/slices/current-slice.md`
+  for its evidence. Next story: US-05. Replace the temporary pre-claim guard only
+  when the Docker-enabled execution/publication path is implemented and tested.
+  List these contracts under `## Contract Inputs` when planning that slice.
 - Story mapping: US-04 uses Contracts 1 and 3 plus startup portions of Contract 6;
   US-05 uses all contracts; US-06 additionally exercises Contract 4 recovery;
   US-07 exercises Contract 6 fresh requeue with all inherited execution gates.

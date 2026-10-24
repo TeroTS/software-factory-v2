@@ -12,7 +12,10 @@ from software_factory.process import Commands
 from software_factory.runner import Runner, preflight
 from software_factory.sandbox import Sandbox, VerificationFailed
 
-pytestmark = pytest.mark.e2e
+pytestmark = [
+    pytest.mark.e2e,
+    pytest.mark.skip(reason="historical live harness disabled until Docker-enabled execution lands in US-05"),
+]
 
 
 def test_operator_submits_issue_and_observes_linked_validated_draft_pr() -> None:

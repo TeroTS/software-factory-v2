@@ -9,6 +9,9 @@ from tests_support import prepared_compose
 from software_factory.config import Config
 from software_factory.process import FactoryError
 
+# Preserve historical orchestration scenarios for porting, not as acceptance of the guarded US-04 runner.
+pytestmark = pytest.mark.skip(reason="prepared-Compose runner removed; port these execution regressions in US-05/06/07")
+
 
 @pytest.fixture
 def runtime(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):

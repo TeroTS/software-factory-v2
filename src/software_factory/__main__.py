@@ -24,8 +24,8 @@ def main() -> int:
     previous = signal.signal(signal.SIGTERM, stop)
     try:
         config = load_config(args.config)
-        prepared = preflight(config)
-        Runner(config, prepared).run()
+        runtime = preflight(config)
+        Runner(config, runtime).run()
     except FactoryError as error:
         logging.getLogger("software_factory").error("%s", error)
         return 1

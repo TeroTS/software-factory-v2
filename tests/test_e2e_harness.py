@@ -13,7 +13,7 @@ CLAIMED = {"state": "open", "labels": []}
 
 @pytest.fixture
 def harness(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    config = Config("TeroTS/factory-smoke-test", tmp_path / "compose.yaml", "agent", "model")
+    config = Config("TeroTS/factory-smoke-test", "model", "agent:v1", tmp_path / "artifacts")
     github = Mock()
     github.discover.return_value = []
     github.open_pr.side_effect = [None, URL]

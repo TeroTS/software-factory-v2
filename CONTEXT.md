@@ -1,8 +1,9 @@
 # Domain Vocabulary
 
-Execution terms reflect the accepted direction in [DECISIONS.md](DECISIONS.md);
-the Docker-enabled model is not yet implemented. Behavior and interface contracts
-remain in [SPEC.md](SPEC.md) and [docs/contracts.md](docs/contracts.md).
+Execution terms reflect the accepted direction in [DECISIONS.md](DECISIONS.md).
+US-04 implements shared-image startup with a temporary pre-claim guard; issue
+execution remains deferred to US-05–US-07. Behavior and interface contracts remain
+in [SPEC.md](SPEC.md) and [docs/contracts.md](docs/contracts.md).
 
 ## Canonical Terms
 

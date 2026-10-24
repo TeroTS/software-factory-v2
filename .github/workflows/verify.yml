@@ -9,9 +9,10 @@ permissions:
 
 jobs:
   verify:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04-arm
     env:
       FACTORY_DOCKER_TESTS: "1"
+      FACTORY_AGENT_IMAGE_TESTS: "1"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -24,4 +25,5 @@ jobs:
         with:
           version: "0.5.13"
       - run: ./scripts/setup
+      - run: docker build --platform linux/arm64 -t software-factory-agent:1.0.0 agent
       - run: ./scripts/verify

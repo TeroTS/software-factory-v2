@@ -27,6 +27,9 @@ Source: [DECISIONS.md](DECISIONS.md)
 - A new live Copilot-to-GitHub-PR demonstration as a completion gate. Live authenticated checks require separate approval.
 - Issue comments, attachments, or linked pages as task inputs; separately billed provider fallback.
 
+## Incremental Delivery Constraint
+- During US-04 delivery, the operator approved a temporary pre-claim guard until US-05 is implemented. Validated startup enters read-only polling; discovered issues and direct issue dispatch produce a local execution-unavailable warning without consuming labels, writing GitHub status, creating workspaces, or invoking the old backend. This guard is not the final US-05 issue-processing behavior.
+
 ## User Stories
 
 ### US-04: Start the runner with a shared agent image

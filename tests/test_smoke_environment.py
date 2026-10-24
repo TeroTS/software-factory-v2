@@ -18,6 +18,7 @@ ROOT = Path(__file__).resolve().parents[1]
 CONFIG = ROOT / "artifacts" / "operator" / "factory-smoke-test.toml"
 
 
+@pytest.mark.skip(reason="legacy target-specific agent configuration is no longer supported")
 @pytest.mark.skipif(not CONFIG.is_file(), reason="operator-owned configuration is local, not versioned")
 def test_smoke_environment_configuration_exists() -> None:
     config = load_config(CONFIG)
@@ -31,6 +32,7 @@ def test_docker_test_fixture_matches_host_workspace_owner(tmp_path: Path) -> Non
     assert prepared_compose(tmp_path)["services"]["agent"]["user"] == f"{os.getuid()}:{os.getgid()}"
 
 
+@pytest.mark.skip(reason="legacy target-specific live probe disabled; replace in US-05")
 @pytest.mark.skipif(
     os.environ.get("FACTORY_SMOKE_SANDBOX_TESTS") != "1",
     reason="explicit opt-in required: real Docker, target checkout, and Copilot; no GitHub writes",
