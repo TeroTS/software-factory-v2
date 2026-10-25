@@ -77,12 +77,12 @@ flowchart LR
 | Four-field TOML, migration, safe terminal failures | [config](../../src/software_factory/config.py), [CLI](../../src/software_factory/__main__.py) | config/CLI tests |
 | Immutable image, local engine, bounded startup probe | [runner](../../src/software_factory/runner.py) | [startup tests](../../tests/test_startup.py), [real CLI startup](../../tests/test_startup_docker.py) |
 | Exact duplicate/claim/snapshot/status/PR identity | [GitHub](../../src/software_factory/github.py) | GitHub boundary tests and [orchestration tests](../../tests/test_runner.py) |
-| Shared-image execution, private Pi input, scoped cleanup | [agent lifecycle](../../src/software_factory/sandbox.py), [bridge](../../src/software_factory/sandbox_agent.mjs) | [unit tests](../../tests/test_sandbox.py), [real Docker suite](../../tests/test_docker_integration.py), Node bridge coverage |
+| Shared-image execution, private Pi input, scoped cleanup | [agent lifecycle](../../src/software_factory/sandbox.py), [Python bridge](../../src/software_factory/sandbox_agent.py) | [unit tests](../../tests/test_sandbox.py), [real Docker suite](../../tests/test_docker_integration.py), [bridge tests/coverage](../../tests/test_agent_wrapper.py) |
 | Native startup validation, factory platform flags, target default, original Docker client | [runner](../../src/software_factory/runner.py), [agent lifecycle](../../src/software_factory/sandbox.py) | [startup tests](../../tests/test_startup.py), [unit tests](../../tests/test_sandbox.py), [real Docker suite](../../tests/test_docker_integration.py) |
 | Trusted Git and create-only push | [repository](../../src/software_factory/repository.py) | real local Git boundary tests and [CLI issue E2E](../../tests/test_issue_docker.py) |
 | Deadline/private diagnostics/process termination | [commands](../../src/software_factory/process.py) | real process tests; Docker expiry/SIGTERM checks |
 | Native baseline | [Dockerfile](../../agent/Dockerfile), [image guide](../../agent/README.md) | real native image/tool checks |
-| ARM64 integration/coverage gates | [CI](../../.github/workflows/verify.yml), [Makefile](../../Makefile) | Ruff; Python overall line/branch and Node line/branch/function ≥80% |
+| ARM64 integration/coverage gates | [CI](../../.github/workflows/verify.yml), [Makefile](../../Makefile) | Ruff; Python overall line/branch ≥80%, including the Pi bridge |
 
 The issue E2E runs real CLI/TOML/polling, local Git checkout/create-only push,
 shared-image execution, target-specific installation, Docker build/Compose/service

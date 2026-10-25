@@ -13,7 +13,7 @@ Source: [DECISIONS.md](DECISIONS.md)
 - Support local ARM64 Linux containers, including Apple Silicon macOS with a local Docker provider; use the same absolute workspace path on host and agent.
 - Preserve one repository/runner, serial issue runs, 30-second polling, a shared 900-second deadline, three verification repairs, duplicate protection, create-only publication, and fresh manual requeue.
 - Clean known run-owned resources on success and failure while preserving unrelated resources and private failed-run diagnostics.
-- Validate real local Docker/macOS boundaries, run Docker integration CI on ARM64, and preserve format/lint/tests and the Python and Node 80% coverage gates.
+- Validate real local Docker/macOS boundaries, run Docker integration CI on ARM64, and preserve format/lint/tests and the Python 80% coverage gate, including the standalone Python Pi wrapper.
 - Replace the old execution path completely, reusing coordination/publication logic and removing obsolete validation, configuration, fixtures, and tests as replacements land.
 
 ## Non-Goals
@@ -91,7 +91,7 @@ Acceptance criteria:
 - Demonstrate the focused flow with real Docker build/Compose/service-backed verification and scripted Pi/GitHub boundaries. Also verify same-path sibling bind mounts, target-specific installation, socket access, host file ownership, and a macOS browser reaching a published application port on the actual local provider. Linux CI alone does not prove desktop sharing/networking.
 - Test cleanup on success, setup/verification failure, timeout, interruption, and partial startup, including cleanup failure blocking publication. Preserve an unrelated sentinel container/network/volume. Test credentials, architecture failures, deadline, duplicates, empty output, publication failures, and private diagnostic retention.
 - Preserve useful existing coordination, deadline, credential-validation, verification-feedback, and publication logic. Complete the removal audit: one execution path, no obsolete callers/compatibility backend, and no obsolete fixtures retained solely to keep removed code alive. Update current instructions, configuration guidance, and architecture/workflow docs to the new model without obsolete isolation claims.
-- Run format/lint/tests and real Docker integration checks on ARM64 with unchanged Python overall line/branch and Node line/branch/function 80% coverage gates. Distinguish scripted boundaries from real services; no live Copilot/GitHub-writing demonstration is required or implicitly authorized.
+- Run format/lint/tests and real Docker integration checks on ARM64 with the unchanged Python overall line/branch 80% coverage gate, including the standalone Python Pi wrapper. No production JavaScript remains; the former Node-only coverage harness/gates are retired. Distinguish scripted boundaries from real services; no live Copilot/GitHub-writing demonstration is required or implicitly authorized.
 
 Deferred follow-ups:
 - US-06: Recover a verification failure using bounded repairs.

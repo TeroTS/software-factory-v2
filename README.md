@@ -23,7 +23,6 @@ Development prerequisites:
 
 - Python **3.14.3**, selected by [`.python-version`](.python-version).
 - **uv 0.5.13**, Make, a POSIX shell, and Git.
-- **Node.js 22.19+**; CI uses **22.19.0**.
 - Local native ARM64 Docker with Compose for integration checks. Ordinary local
   verification needs neither Docker nor service credentials.
 
@@ -46,17 +45,18 @@ Help does not start polling.
 | Command | Purpose |
 | --- | --- |
 | `./scripts/setup` | Synchronize dependencies; reject a stale lockfile. |
-| `./scripts/verify` | Ruff format check → Ruff lint → Python coverage/tests → Node bridge coverage/tests. |
+| `./scripts/verify` | Ruff format check → Ruff lint → Python coverage/tests, including the Pi bridge. |
 | `make format` | Apply Ruff formatting. |
 | `make format-check` | Check formatting without modifying files. |
 | `make lint` | Check Ruff lint rules. |
 | `make test` | Run pytest without coverage enforcement. |
-| `make coverage` | Run Python and Node coverage checks. |
+| `make coverage` | Run Python coverage checks, including the Pi bridge. |
 | `uv run --frozen pytest tests/test_runner.py tests/test_sandbox.py -q` | Focused execution, failure, and cleanup checks. |
 
-Python overall line/branch coverage and Node line/branch/function coverage must
-meet their **80%** gates. Do not lower them or exclude business logic. Reports,
-workspaces, and caches are ignored. No standalone type checker or Markdown linter
+Python overall line/branch coverage, including the standalone Python Pi bridge,
+must meet its **80%** gate. Do not lower it or exclude business logic. Node.js
+remains in the shared image for Pi and target tooling; host verification does not
+require Node.js. Reports, workspaces, and caches are ignored. No standalone type checker or Markdown linter
 is configured. Packaging uses pinned Hatchling; there is no release workflow.
 
 Build the shared image explicitly before running the native Docker suite:
@@ -68,7 +68,7 @@ FACTORY_DOCKER_TESTS=1 FACTORY_AGENT_IMAGE_TESTS=1 ./scripts/verify
 
 `FACTORY_AGENT_IMAGE` overrides the already-built fixture image reference for both
 Docker suites. [CI](.github/workflows/verify.yml) uses `ubuntu-24.04-arm`, Python
-3.14.3, Node 22.19.0, and uv 0.5.13; it explicitly builds the image before verifying.
+3.14.3 and uv 0.5.13; it explicitly builds the image before verifying.
 The runner itself never builds/pulls the shared image.
 
 [Docker tests](tests/test_docker_integration.py) exercise actual target builds,

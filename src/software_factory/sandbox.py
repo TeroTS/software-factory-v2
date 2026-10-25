@@ -143,9 +143,9 @@ class Sandbox:
     def implement(
         self, snapshot: dict, bearer: str, endpoint: str, model: str, *, verification_output: str | None = None
     ) -> None:
-        script = Path(__file__).with_name("sandbox_agent.mjs").read_text()
+        script = Path(__file__).with_name("sandbox_agent.py").read_text()
         self.commands.run(
-            self.base + ["node", "--input-type=module", "-e", script],
+            self.base + ["/usr/local/bin/python", "-I", "-c", script],
             "implementation" if verification_output is None else "repair",
             cwd=self.directory,
             env=self.env,

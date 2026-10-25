@@ -15,7 +15,7 @@ This record supersedes the previous execution-model decisions. It consolidates `
 - Eliminate target-specific factory sandbox preparation and retain exactly one execution path.
 - Preserve serial issue processing, the 900-second issue-run deadline, three verification repairs, host-side publication, duplicate protection, and fresh manual requeue.
 - Demonstrate same-path workspace mounts, target-specific tool installation, explicit service networking, host-usable files, and scoped cleanup across success and failure paths.
-- Pass the existing format/lint/test checks and unchanged Python and Node 80% coverage gates, with Docker integration CI exercising ARM64.
+- Pass the existing format/lint/test checks and unchanged Python 80% coverage gate, with Docker integration CI exercising ARM64.
 
 ## Primary Roles / Actors
 
@@ -138,7 +138,8 @@ This record supersedes the previous execution-model decisions. It consolidates `
 - Require real local Docker evidence of image build, ordinary Compose startup, service-backed E2E verification, target-specific installation, and browser access from macOS to a published application port.
 - Test cleanup after success, setup failure, exhausted repairs, timeout, interruption, and partial startup. Include an unrelated sentinel container/network/volume and verify preservation.
 - Test cleanup failure blocking publication and preserve deadline, duplicate protection, credential handling, fresh manual requeue, and private retained-diagnostic behavior.
-- Move Docker integration CI to ARM64 and retain existing format/lint/tests and unchanged Python/Node 80% coverage gates.
+- Move Docker integration CI to ARM64 and retain existing format/lint/tests and the unchanged Python 80% coverage gate.
+- Operator-approved Python Pi-wrapper replacement: use a standalone standard-library Python script instead of the JavaScript CLI wrapper, preserving invocation/credential behavior. Measure the wrapper in Python line/branch coverage; retire the Node-only coverage harness/gates because no production JavaScript remains. Node stays in the shared image for Pi and target tooling.
 - A live Copilot request or GitHub-writing issue-to-PR demonstration requires separate explicit approval. Scripted boundaries and local Docker checks must not be presented as live acceptance.
 - Remove superseded Compose validation, mount rewriting, configuration handling, fixtures, and tests as replacements land; preserve tests for unchanged behavior and useful existing credential/verification-feedback logic.
 - Completion includes a removal audit: one execution path, no obsolete callers or compatibility backend, and current documentation describing the new trust model.

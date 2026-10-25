@@ -1,30 +1,56 @@
+import io
 import json
 import os
-import shutil
+import runpy
 import subprocess
+import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 from software_factory.sandbox import PI_FLAGS
 
-NODE = shutil.which("node")
 
-
-@pytest.mark.skipif(NODE is None, reason="Node is needed to exercise the sandbox Pi wrapper")
+@pytest.mark.parametrize("execution", ["script", "in-process"])
 @pytest.mark.parametrize(
-    "outcome", ["success", "repair", "missing-model", "catalog-failure", "execution-failure", "terminated"]
+    "outcome",
+    [
+        "success",
+        "repair",
+        "missing-model",
+        "wrong-provider",
+        "empty-catalog",
+        "catalog-failure",
+        "catalog-terminated",
+        "execution-failure",
+        "terminated",
+        "missing-pi",
+        "missing-execution",
+    ],
 )
-def test_agent_wrapper_uses_ephemeral_credentials_and_exact_model(tmp_path: Path, outcome: str) -> None:
-    wrapper = Path(__file__).resolve().parents[1] / "src/software_factory/sandbox_agent.mjs"
+def test_agent_wrapper_uses_ephemeral_credentials_and_exact_model(
+    tmp_path: Path, outcome: str, execution: str, monkeypatch, capfd
+) -> None:
+    wrapper = Path(__file__).resolve().parents[1] / "src/software_factory/sandbox_agent.py"
     pi = tmp_path / "pi"
     pi.write_text(
-        "#!/usr/bin/env python3\n"
-        "import json, os, pathlib, signal, sys\n"
+        f"#!{sys.executable}\n"
+        "import json, os, pathlib, signal, stat, sys\n"
         "home = pathlib.Path(os.environ['PI_CODING_AGENT_DIR'])\n"
+        f"pathlib.Path({str(tmp_path / 'home-record')!r}).write_text(str(home))\n"
+        "assert stat.S_IMODE(home.stat().st_mode) == 0o700\n"
+        "assert stat.S_IMODE((home/'auth.json').stat().st_mode) == 0o600\n"
         "assert '--no-context-files' in sys.argv\n"
+        "assert 'private-bearer' not in ' '.join(sys.argv)\n"
+        "assert os.environ['PI_OFFLINE'] == '1'\n"
+        "assert os.environ['PI_TELEMETRY'] == '0'\n"
         "if '--list-models' in sys.argv:\n"
-        f"    print('github-copilot {'other' if outcome == 'missing-model' else 'chosen'} 128k 4k')\n"
+        f"    if {outcome == 'catalog-terminated'}: os.kill(os.getpid(), signal.SIGTERM)\n"
+        f"    if {outcome == 'missing-execution'}: pathlib.Path(sys.argv[0]).unlink()\n"
+        f"    print('{'other-provider' if outcome == 'wrong-provider' else 'github-copilot'} "
+        f"{'chosen-extra' if outcome == 'missing-model' else 'chosen'} 128k 4k' "
+        f"if {outcome != 'empty-catalog'} else '')\n"
         f"    sys.exit({7 if outcome == 'catalog-failure' else 0})\n"
         "else:\n"
         "    print(json.dumps({'args': sys.argv[1:], 'auth': json.loads((home/'auth.json').read_text()), "
@@ -34,6 +60,8 @@ def test_agent_wrapper_uses_ephemeral_credentials_and_exact_model(tmp_path: Path
         f"    if {outcome == 'terminated'}: os.kill(os.getpid(), signal.SIGTERM)\n"
     )
     pi.chmod(0o755)
+    if outcome == "missing-pi":
+        pi.unlink()
     payload = {
         "snapshot": {"number": 7, "title": "task", "body": None},
         "bearer": "private-bearer",
@@ -43,14 +71,32 @@ def test_agent_wrapper_uses_ephemeral_credentials_and_exact_model(tmp_path: Path
     }
     if outcome == "repair":
         payload["verification_output"] = "assert actual == expected\nverification stderr"
-    result = subprocess.run(
-        [NODE, str(wrapper)],
-        input=json.dumps(payload),
-        text=True,
-        capture_output=True,
-        env={**os.environ, "PATH": f"{tmp_path}:{os.environ['PATH']}"},
-    )
-    if outcome in {"missing-model", "catalog-failure"}:
+    # Execute real child processes in both modes; runpy also measures the standalone wrapper's Python coverage.
+    if execution == "script":
+        result = subprocess.run(
+            [sys.executable, "-I", "-c", wrapper.read_text()],
+            input=json.dumps(payload),
+            text=True,
+            capture_output=True,
+            env={**os.environ, "PATH": str(tmp_path)},
+        )
+    else:
+        monkeypatch.setenv("PATH", str(tmp_path))
+        monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(payload)))
+        with pytest.raises(SystemExit) as exit_status:
+            runpy.run_path(str(wrapper), run_name="__main__")
+        output = capfd.readouterr()
+        result = SimpleNamespace(returncode=exit_status.value.code, stdout=output.out, stderr=output.err)
+    record = tmp_path / "home-record"
+    if record.exists():
+        assert not Path(record.read_text()).exists()
+    assert "private-bearer" not in result.stderr
+    if outcome in {"missing-pi", "missing-execution"}:
+        assert result.returncode == 1
+        assert "Pi invocation failed" in result.stderr
+        assert "Traceback" not in result.stderr
+        return
+    if outcome in {"missing-model", "wrong-provider", "empty-catalog", "catalog-failure", "catalog-terminated"}:
         assert result.returncode != 0
         assert "configured Copilot model is unavailable" in result.stderr
         assert "private-bearer" not in result.stderr

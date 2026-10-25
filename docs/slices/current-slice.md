@@ -4,7 +4,9 @@ Status: done
 
 Current US-05 correction: host UID/GID execution with explicit `sudo -n` and no
 workspace permission repair supersedes the historical root/helper evidence below.
-See **Host-user correction evidence** for current verification.
+See **Host-user correction evidence** for that verification. The operator-approved
+Python Pi-wrapper replacement retires the Node-only coverage harness/gates;
+current Python coverage includes the bridge.
 
 ## Slice Goal
 - Let the operator turn a labeled issue into a Docker-verified draft PR using the shared agent image and the target's ordinary application services.
@@ -51,7 +53,7 @@ See **Host-user correction evidence** for current verification.
 ## Operations / Endpoints / Surfaces In This Slice
 - `src/software_factory/runner.py`: replace the temporary pre-claim guard with serial first-pass coordination, private run lifecycle, cleanup-before-publication, and safe outcome reporting. Preserve startup image/engine validation.
 - `src/software_factory/sandbox.py`: replace historical prepared-Compose validation/mount rewriting/lifecycle with the shared-image Docker execution and scoped cleanup boundary; reuse credential validation and explicit verification-result handling where applicable. Keep only one execution path.
-- `src/software_factory/sandbox_agent.mjs`: preserve exact-model, temporary-config, disabled-discovery, nonpersistent Pi invocation and stdin-only credentials; inspect run-context/instruction needs without adding recovery behavior.
+- `src/software_factory/sandbox_agent.py`: preserve exact-model, temporary-config, disabled-discovery, nonpersistent Pi invocation and stdin-only credentials; inspect run-context/instruction needs without adding recovery behavior.
 - `src/software_factory/github.py`, `repository.py`, and `process.py`: reuse existing exact duplicate detection, confirmed trigger removal, snapshotting, trusted create-only publication, shared deadlines, private logging, and redaction; change only where required by the new execution path.
 - `src/software_factory/__main__.py` and `config.py`: inspect interruption/error callers and preserve existing CLI/TOML interfaces.
 - `tests/test_runner.py`, `test_docker_integration.py`, `test_sandbox.py`, `tests_support.py`, and related startup/boundary/publication tests: port first-pass regressions and replace obsolete fixtures/assertions, retaining useful independent Git/process/credential/bridge coverage. Audit historical live harness callers without enabling them.
@@ -66,7 +68,7 @@ See **Host-user correction evidence** for current verification.
 - Preserve an unrelated sentinel container/network/volume and earlier diagnostic artifacts; confirm exact ownership matching and no broad pruning, image/cache deletion, or deletion based only on disuse.
 - Negative boundaries: missing/nonexecutable entrypoints, failed setup before Pi, malformed/expired credentials, endpoint/model/provider failures, incompatible engine/shared agent image at startup, actual Docker/setup/verification failures, lifecycle/verification transport errors, deadline expiry across phases, empty diff, commit/push/PR/reporting failures, uncertain-write inspection without retry, and private/redacted retained diagnostics. Target platform overrides are not intercepted or guaranteed to be rejected.
 - Regression/removal audit: preserve US-04 startup failures and immutable session image semantics. Assert agent startup performs only the container start, leaving the image Docker executable unchanged and the native target default present. Remove obsolete backend callers/fixtures; deferred US-06/US-07 scenarios remain in git history rather than skipped obsolete-runtime tests.
-- Run `./scripts/verify` in format → lint → coverage order. Explicitly build the local shared image, then run `FACTORY_DOCKER_TESTS=1 FACTORY_AGENT_IMAGE_TESTS=1 FACTORY_E2E_APPROVED=0 FACTORY_COPILOT_TESTS=0 FACTORY_SMOKE_SANDBOX_TESTS=0 ./scripts/verify` on ARM64, extending the real Docker suite for US-05. Preserve Python overall line/branch and Node line/branch/function 80% gates and report skips/coverage changes.
+- Run `./scripts/verify` in format → lint → coverage order. Explicitly build the local shared image, then run `FACTORY_DOCKER_TESTS=1 FACTORY_AGENT_IMAGE_TESTS=1 FACTORY_E2E_APPROVED=0 FACTORY_COPILOT_TESTS=0 FACTORY_SMOKE_SANDBOX_TESTS=0 ./scripts/verify` on ARM64, extending the real Docker suite for US-05. Preserve the Python overall line/branch 80% gate, including the Pi bridge, and report skips/coverage changes.
 
 ## Not Now
 - US-06 repair-and-verify recovery, exactly-three-repair exhaustion, and recovery-to-publication acceptance. Preserve reusable feedback handling but do not add the recovery loop in this slice.
@@ -81,7 +83,7 @@ See **Host-user correction evidence** for current verification.
 - Native execution, same-path sharing, target installation, socket access, explicit networking, desktop browser access, and host file usability have real local evidence.
 - Known run-owned mutating processes/services stop and required scoped cleanup completes before host publication; unrelated resources and earlier diagnostics remain intact. Expiry/interruption still attempts bounded cleanup.
 - One execution path remains, obsolete prepared-Compose helpers/callers/fixtures are removed or replaced, and current operator/architecture/workflow guidance accurately describes US-05 without claiming repair/requeue acceptance.
-- Focused story E2E, failure/boundary tests, real ARM64 Docker checks, format/lint, and unchanged Python/Node coverage gates pass; verification gaps are reported rather than marked complete.
+- Focused story E2E, failure/boundary tests, real ARM64 Docker checks, format/lint, and the unchanged Python coverage gate pass; verification gaps are reported rather than marked complete.
 
 ## Historical Completion Summary
 
@@ -145,7 +147,7 @@ current verification.
   user-local npm tooling, writable home/caches, explicit root system installation,
   unchanged cleanup metadata, host-usable ordinary success/failure output, scoped
   failure/timeout/interruption cleanup, and sentinel preservation all pass.
-- Current full verification:
+- Host-user correction verification (before the Python Pi-wrapper replacement):
   `UV_NATIVE_TLS=true FACTORY_DOCKER_TESTS=1 FACTORY_AGENT_IMAGE_TESTS=1 ./scripts/verify`
   passed format → lint → coverage: **258 Python tests passed, zero skipped**;
   Python overall line/branch coverage **98.93%** (up from 98.79%); Node bridge
@@ -158,6 +160,33 @@ current verification.
   and runs these same Docker suites. No new browser check or live authenticated
   Copilot/GitHub request was performed; earlier browser evidence remains historical.
   No commit/push or changes to the unrelated workflow document were made.
+
+## Python Pi-wrapper replacement evidence
+
+- Replaced `sandbox_agent.mjs` with standalone standard-library `sandbox_agent.py`,
+  executed through `/usr/local/bin/python -I -c` inside the existing agent.
+  Exact provider/model matching, prompts/flags, stdin-only bearer delivery,
+  temporary private credentials, output forwarding, and exit handling are retained.
+  No dependency or image change was required; Node remains available for Pi.
+- Test-first: the wrapper and sandbox invocation tests failed before the Python
+  script existed. The replacement passes **50 focused tests**, including real Pi
+  fixture subprocesses in both isolated-script and in-process coverage modes.
+  Cases cover success/repair, exact model/provider mismatch, empty/failed/terminated
+  catalog, execution failure/termination, missing executable, private file modes,
+  and cleanup after invocation failures.
+- Removed the JavaScript wrapper and Node-only coverage harness, Make command,
+  and host CI Node setup under the approved policy update. Python's overall
+  line/branch **80%** gate and business-logic coverage scope remain unchanged;
+  the Python bridge is measured rather than excluded.
+- `make format-check && make lint && make coverage` passed: **250 passed,
+  35 opt-in Docker checks skipped**, overall coverage **99.04%**, bridge **100%**.
+- `UV_NATIVE_TLS=true FACTORY_DOCKER_TESTS=1 FACTORY_AGENT_IMAGE_TESTS=1 ./scripts/verify`
+  passed on the existing local native ARM64 engine/image: **285 passed, zero skipped**,
+  format/lint clean, overall coverage **99.04%**, bridge **100%**. Overall coverage
+  is up from the recorded host-user correction's **98.93%**; thresholds were not lowered.
+  Docker/CLI checks use scripted Pi/GitHub boundaries, not live authenticated services.
+- No new image build, browser check, live Copilot/GitHub request, remote CI run,
+  commit, or push was performed. The unrelated workflow document remains untouched.
 
 ## Next Slice Recommendation
 - `US-06 Recover a Docker-enabled verification failure`: add bounded repair-and-verify recovery in the same agent environment/workspace under the original deadline, preserving all US-05 cleanup/publication gates. Keep `US-07 Manually requeue Docker-enabled work` in view for fresh-run identity/input/diagnostic invariants, without including its full outcome in the recovery slice.

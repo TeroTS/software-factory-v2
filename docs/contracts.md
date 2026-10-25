@@ -429,8 +429,11 @@ and at most three verification repairs after initial implementation.
   agent-to-service connectivity, and macOS browser access to a published port.
   Exercise cleanup success/failure/expiry/interruption/partial startup and preserve
   an unrelated sentinel container/network/volume. Linux CI is not desktop evidence.
-- Retain format/lint/tests and unchanged Python overall line/branch and Node
-  line/branch/function 80% coverage gates; Docker integration CI must use ARM64.
+- Retain format/lint/tests and the unchanged Python overall line/branch 80%
+  coverage gate, including the standalone Python Pi wrapper. The operator-approved
+  wrapper replacement retires the Node-only coverage harness/gates because no
+  production JavaScript remains; Node remains in the shared image for Pi and
+  target tooling. Docker integration CI must use ARM64.
   Preserve useful existing failure/publication/credential checks as old execution
   fixtures are replaced. Audit removal of obsolete callers/backend/configuration
   and update runtime documentation/instructions without stale isolation claims.

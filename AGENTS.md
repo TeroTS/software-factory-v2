@@ -25,17 +25,18 @@ GitHub holds durable coordination; no database, HTTP API, or hosted deployment e
 - `agent/`: factory-maintained pinned shared-image build definition and instructions.
 - `github.py`, `repository.py`: host GitHub CLI and trusted Git publication.
 - `process.py`: command deadlines, safe errors, private/redacted diagnostics.
-- `sandbox.py`, `sandbox_agent.mjs`: shared-image agent lifecycle, scoped cleanup, credentials/Pi/verification.
+- `sandbox.py`, `sandbox_agent.py`: shared-image agent lifecycle, scoped cleanup, credentials/Pi/verification.
 - `tests/`: pytest unit, real local Git/process/Docker, scripted external-boundary CLI E2E;
-  `tests/wrapper-coverage.test.mjs` drives bridge coverage through pytest.
+  `tests/test_agent_wrapper.py` exercises the standalone Python bridge and measures its coverage.
 - `scripts/`, `Makefile`, `.github/workflows/verify.yml`: development entrypoints and CI.
 - `docs/architecture/service-architecture.md`: component diagram and boundary evidence.
 
 ## Development workflow
 
 From the repository root, use Python **3.14.3**, uv **0.5.13**, Make, a POSIX shell,
-Git, and Node.js **22.19+** (CI: **22.19.0**). Dependencies are locked in `uv.lock`;
-Hatchling is pinned in `pyproject.toml`. Setup installs the package editable.
+and Git. Node.js remains in the shared image for Pi/target tooling, not host
+verification. Dependencies are locked in `uv.lock`; Hatchling is pinned in
+`pyproject.toml`. Setup installs the package editable.
 
 ```sh
 ./scripts/setup
@@ -45,10 +46,10 @@ uv run --frozen pytest tests/test_toolchain.py -q
 ```
 
 - `make format` mutates formatting; `make format-check` and `make lint` do not.
-- `make test` runs pytest; `make coverage` runs Python plus Node bridge coverage.
+- `make test` runs pytest; `make coverage` runs Python coverage, including the Pi bridge.
 - Verification order: Ruff format check → Ruff lint → tests/coverage.
-- Python overall line/branch coverage and Node line/branch/function coverage must
-  meet their **80%** gates. Never lower thresholds or exclude business logic.
+- Python overall line/branch coverage, including the Pi bridge, must meet its
+  **80%** gate. Never lower thresholds or exclude business logic.
 - No standalone type checker or Markdown linter is configured. Packaging uses the
   pinned backend; there is no release workflow.
 

@@ -79,6 +79,9 @@ def test_setup_implementation_and_verification_stay_inside_agent(sandbox) -> Non
         assert call.args[0][:6] == ["docker", "exec", "--user", str(os.getuid()), "-i", instance.project]
     assert calls[1].args[0][-1] == "./scripts/setup"
     implementation = calls[2]
+    script = Path(__file__).resolve().parents[1] / "src/software_factory/sandbox_agent.py"
+    assert script.is_file(), "Pi wrapper must be a standalone Python script"
+    assert implementation.args[0][6:] == ["/usr/local/bin/python", "-I", "-c", script.read_text()]
     assert "private-bearer" not in " ".join(implementation.args[0])
     payload = json.loads(implementation.kwargs["input"])
     assert payload["snapshot"]["title"] == "$(touch /host)"
