@@ -34,7 +34,6 @@ GitHub holds durable coordination; no database, HTTP API, or hosted deployment e
 - `scripts/`, `Makefile`, `.github/workflows/verify.yml`: development entrypoints and CI.
 - `scripts/provision-host`, `infra/lima/`: explicit Ubuntu host preparation;
   privileged provisioning checks require operator authorization.
-- `docs/architecture/service-architecture.md`: component boundaries and trust model.
 
 ## Development workflow
 

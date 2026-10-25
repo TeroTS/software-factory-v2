@@ -274,8 +274,7 @@ approval.
 
 ## Architecture and repository structure
 
-[Architecture](docs/architecture/service-architecture.md),
-[workflow](docs/simplified_worflow.md), [spec](SPEC.md), and
+[Workflow](docs/simplified_worflow.md), [spec](SPEC.md), and
 [contracts](docs/contracts.md) describe the shared-image boundaries.
 
 - `agent/`: pinned shared-image build definition/instructions.
