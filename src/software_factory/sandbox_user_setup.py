@@ -7,7 +7,7 @@ from pathlib import Path
 
 uid, gid = map(int, sys.argv[1:])
 home = Path("/tmp/factory-home")
-home.mkdir(mode=0o700)
+home.mkdir(mode=0o700, exist_ok=True)
 os.chown(home, uid, gid)
 passwd = Path("/etc/passwd")
 users = [line.split(":") for line in passwd.read_text().splitlines()]

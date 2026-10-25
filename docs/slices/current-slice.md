@@ -3,164 +3,89 @@
 Status: done
 
 ## Slice Goal
-- Let the operator explicitly provision a Linux factory host ready for manual authentication and later runner startup.
+- Let the operator start the runner under the fixed factory account and observe validated polling.
 
 ## Slice Boundary
 - Actor: Operator.
-- Trigger: An explicitly authorized Ubuntu Server 24.04 LTS ARM64 host is available for factory setup.
-- Action: Prepare the local Lima host using the repository-maintained provisioning entrypoint/runbook.
-- Visible outcome: The fixed factory account and validated prerequisites are ready for manual authentication and runner startup.
-- Authoritative state transition: Unprepared Linux host → provisioned factory host with verified identity/tool access.
-- Include readiness validation and failure reporting, without issue processing or automatic authentication.
+- Trigger: A provisioned host has manual authentication, existing operator configuration, and an explicitly built updated shared agent image.
+- Action: Start the runner under the factory account through the existing CLI/preflight path.
+- Visible outcome: The runner validates the fixed host/image identity and enters polling.
+- Authoritative state transition: Stopped configured runner → validated fixed-identity runner polling the repository.
+- Include startup validation, failure diagnostics, cleanup, and interruption; do not process an issue or redesign configuration.
 
 ## Stories In Scope
-- `US-08 Provision a Linux factory host`
+- `US-09 Start the runner with the fixed factory identity`
 
 ## Stories Completed In This Slice
-- `US-08 Provision a Linux factory host`
+- `US-09 Start the runner with the fixed factory identity`
 
 ## Stories Remaining In This Slice
 - None.
 
 ## Contract Inputs
-- `docs/contracts.md`, Contract 9: explicit provisioning, fixed account, sources/verification, Lima/native storage, repeatability, readiness, failure handling, and local-VM-only acceptance.
-- `docs/contracts.md`, Contract 1: authentication, image build, and runner startup remain subsequent operator actions; preserve CLI/TOML.
+- `docs/contracts.md`, Contract 1: unchanged CLI/four-field TOML, supported host/effective identity, artifact/authentication checks, immutable local image, fail-closed startup, cleanup, and exit semantics.
+- `docs/contracts.md`, Contract 3: Debian-based native image, build-time factory identity/home/caches/npm prefix/account-scoped sudo, no runtime account mutation in the startup probe, and explicit rebuild/restart guidance.
+- `docs/contracts.md`, Contract 9: already-provisioned Ubuntu 24.04 ARM64 Lima host; provisioning, authentication, and image builds remain explicit operator actions.
 - No factory-owned HTTP API or `openapi.yaml` applies.
 
 ## Decision Inputs
-- `DECISIONS.md`, Operations / Deployment and Open Questions: operator-approved local-VM-only acceptance supersedes separate production-like host repetition; explicit agreement before installation/allocation, verified release/package inputs before installation commands, and no automatic trust/source/version fallback remain required.
+- `DECISIONS.md`, Operations / Deployment and Operational / Deployment Constraints: fixed factory 2000:2000 deployment, baked image identity, local-Lima-only acceptance, ARM64 CI under the fixed identity, and explicit authorization for environment preparation.
 
 ## Shared State Required Now
-- Host account/group `factory`, UID/GID `2000:2000`, Docker membership, no general host passwordless sudo.
-- Operator-approved persistent Lima 2.2.1 VM: 4 CPUs, 8 GiB RAM, 40 GiB disk, native Linux execution data, no macOS directory sharing, and Rancher stopped while Lima is in use.
-- SSH plus one explicit guest TCP 8080 → macOS 127.0.0.1:8080 forward; other automatic service forwards suppressed. Rosetta/containerd disabled.
-- Recorded source/package/release pins and verification evidence; existing correct account/tool installations and previous credentials/repositories/diagnostics preserved on repeated provisioning.
-- Operator-approved local public Zscaler CA, fingerprint `04F61F1D13AAE1D16573DC2C37F796FDF4AC97713A6959EBB11D2473958B1A53`. It was installed only in the authorized guest; generic provisioning does not copy/add trust roots.
-- No issue-run state, new TOML fields, credentials, or recovery state.
+- Existing provisioned local Lima Ubuntu 24.04 ARM64 host with factory UID/GID 2000:2000 and Docker access; no new account/configuration/artifact migration.
+- Fixed image account/group factory 2000:2000, writable container-local `/tmp/factory-home`, XDG caches, npm user-local prefix/bin PATH, and factory-only passwordless sudo with root HOME selection.
+- Existing four-field operator configuration, session-resolved immutable image ID, selected local Unix socket endpoint, and unique startup-probe cleanup identity.
+- Existing retained diagnostics and workspace permissions remain unchanged.
+- No issue-run state, socket-group mechanism, new configuration fields, or recovery state is added in this slice.
 
 ## Operations / Endpoints / Surfaces In This Slice
-- `scripts/provision-host`: explicit Ubuntu system-Python bootstrap, separate from `scripts/setup`.
-- `src/software_factory/provision.py`: host/identity checks, authenticated pinned APT installation, verified official Python/Node/uv releases, user-scoped pinned Pi installation, factory login paths, native Docker readiness, and `--check` without installation/account changes.
-- Installation uses `/opt/software-factory` version directories, factory-local npm/Pi, and a factory-only `/etc/profile.d/software-factory.sh`; system Python is unchanged. Commands share a one-hour budget and private 0600 logs, with safe partial-failure diagnostics.
-- `infra/lima/factory.yaml` and README operator commands describe VM setup/provisioning. Exact resolved source versions, verification provenance, implementation notes, and delivery evidence are recorded only in this slice note.
-- Durable docs contain operator guidance, standing rules, and architecture boundaries—not story status, implementation history, or test results. Existing runner/image behavior is unchanged.
-- The operator explicitly removed deployment/testing outside this local VM from scope. No separate-host acceptance blocker remains, and US-09 has not been started.
-- Consolidated delivery tracking and source-verification records into this note. Removed story/status/history from durable guidance; preserved concurrent removal of `docs/workflows/` and `docs/plans/` and relocation of the user-owned simplified workflow without recreating or editing those files.
+- `src/software_factory/runner.py`: reject unsupported OS/architecture and effective UID/GID before artifact/probe/issue activity; validate image identity/home/tools/sudo without calling runtime user initialization; preserve existing preflight cleanup and polling behavior.
+- `agent/Dockerfile`: bake the fixed account/group/home/caches/npm prefix and account-scoped sudo; select the factory execution identity while preserving Debian and existing base/tool pins.
+- `.github/workflows/verify.yml`: execute verification under factory 2000:2000 with Docker access, not the hosted runner's default identity.
+- `tests/test_startup.py`, `tests/test_startup_docker.py`, affected CLI/toolchain tests and fixtures: identity rejection, image incompatibility, actual image execution, real CLI polling, and preserved failure/cleanup/interruption behavior.
+- `sandbox_user_setup.py` now tolerates the already-baked home (`exist_ok=True`) and preserves its contents, keeping existing issue execution runnable until US-10 removes this initializer. No socket-group mechanism, alternate backend, or workspace repair was introduced.
+- Retired the three-case real-Docker arbitrary-ID/sudo test because arbitrary identities and general image sudo are no longer supported. Added actual factory-only sudo/identity checks instead; retained other existing execution/failure regressions and initializer unit tests until US-10.
+- Updated README, agent instructions, and standing guidance for the supported host, image identity, and explicit rebuild/restart. CLI/TOML, tool/base pins, and provisioning are unchanged.
+- Working tree was clean at planning start. The operator authorized fresh test checkouts, declared development dependency installation, and an explicit updated image build in the existing Lima VM; no live authentication/service access was used.
 
 ## Tests Required
-- Real Lima readiness E2E: `FACTORY_PROVISION_TESTS=1 uv run --frozen pytest tests/test_provision_lima.py -q` passed from the initial unprovisioned guest, then on repeated checks. It stages only trusted bootstrap code, installs/checks tools and actual factory Docker access, seeds private source/diagnostic sentinels, repeats provisioning, and confirms their content/ownership/mode survive. It removes only its own sentinels; bootstrap snapshots and private command logs remain.
-- `tests/test_provision.py`: **56** unit/boundary cases cover unsupported/rootless invocation, name/ID conflicts, correct reuse, managed-file preservation/symlinks, unavailable downloads/HTTPS downgrade/checksum failure, Node signature/manifest failures, safe archives, exact signed APT arguments and installation failure, factory-only Pi/environment, version/home/UID/GID failures, forbidden general shell sudo, unusable socket/engine, malformed responses, phase ordering, and safe partial-failure/deadline diagnostics. External command/install failures are scripted, not destructive experiments on existing accounts.
-- Test-first failures reproduced absent implementation, wrong wildcard forwarding defaults, missing uv system-CA selection, unsafe empty archive paths, missing socket/malformed engine diagnostics, and non-logging error reporting before the corresponding changes.
-- Local `factory` VM creation and stop/start passed using the checksum-verified Ubuntu 20260926 ARM64 image. Guest checks confirmed Ubuntu 24.04/aarch64, four CPUs, ~7.7 GiB usable RAM, native root storage, and no virtiofs/9p/SSHFS mounts. Post-install root free space is ~35 GiB. Rancher is stopped. SSH access passed.
-- Temporary HTTP fixtures proved macOS loopback 8080 reachability and non-forwarding of guest-reachable 18081; both were stopped. Initial host port 8081 unavailability was handled without changing an existing service. These are HTTP probes, not browser/Docker application-service evidence.
-- Initial guest HTTPS failed on all required source hosts. After explicit CA approval/installation, verified HTTPS passed. Signed APT metadata, exact package versions, official archive checksums, Node's detached signature, and Pi registry integrity were checked/recorded before installation implementation.
-- Factory login checks passed for 2000:2000, Python 3.14.3, Node 22.19.0, uv 0.5.13, Pi 1.3.0, and actual native local Docker. uv found the separate Python and resolved declared Ruff 0.17.2 over verified HTTPS with `--dry-run` (no installation). A probe initially retained the inaccessible administrator working directory; rerunning from factory HOME fixed the probe without permission changes. Provisioning commands already set the proper working directory.
-- Final `FACTORY_PROVISION_TESTS=1 ./scripts/verify` passed format → lint → tests/coverage: **308 passed, 35 opt-in Docker/image checks skipped**, Python overall line/branch **99.34%**, provisioning module **100%**. An initial coverage decrease was investigated: root installation paths in the guest subprocess were not measured by host coverage; meaningful in-process external-boundary tests closed those gaps. Final coverage exceeds the prior **99.04%** baseline; the **80%** gate and exclusions are unchanged.
-- `limactl validate infra/lima/factory.yaml`, shell syntax checking, CLI help without polling, and the prior documentation checks passed before consolidation. After this documentation-only cleanup, `git diff --check`, Markdown whitespace/fences, **52 local links/anchors**, canonical slice/source-evidence structure, and absence of story IDs in README/AGENTS/architecture passed. Behavior tests were not rerun because code was unchanged. No standalone type checker/Markdown linter is configured.
-- No separate production-like host evidence is required under the revised operator-approved scope. Existing Docker/image issue-run suites were not enabled: Rancher is stopped and no shared agent image has been built in Lima. Their later command is `FACTORY_DOCKER_TESTS=1 FACTORY_AGENT_IMAGE_TESTS=1 ./scripts/verify` after explicit compatible image preparation; US-09/US-10 migration checks remain separate.
+- Test-first host rejection: macOS/unsupported Linux release/architecture, root, wrong effective UID, and wrong effective GID; reject before commands, artifact changes, or issue claims. Valid identity continues through existing preflight checks.
+- Image checks: actual factory account/group 2000:2000, selected ordinary identity, writable home/caches/npm prefix, required native tools, explicit sudo with root HOME, and rejection of old/wrong-identity/unwritable-home/broken-sudo images with rebuild/restart guidance.
+- Preserve regressions for engine/image architecture and immutable ID, configuration/authentication, artifact preservation/access, partial probe startup, runtime failure, cleanup failure, and SIGTERM/interruption.
+- Explicit story E2E: in the local Lima VM, run the real CLI as factory against the updated real local image with scripted authentication/GitHub boundaries; observe idle polling, no issue claims, probe cleanup, preserved prior diagnostics, and exit 130 on SIGTERM.
+- Run Ruff format check → Ruff lint → tests/coverage, retaining the Python overall line/branch 80% gate. Investigate/report any coverage decrease from the previous recorded 99.34% baseline.
+- Run existing real Docker/image regressions under the fixed account after an explicitly authorized image build; distinguish unchanged execution regression evidence from US-10 acceptance.
+- Check affected documentation links/formatting and CI fixed-identity command behavior. No standalone type checker or Markdown linter is configured.
 
-### Verified provisioning inputs
-
-These inputs were resolved on the authorized Ubuntu 24.04 ARM64 guest on
-2026-10-25 before installation commands were implemented. Verification records
-are consolidated here rather than duplicated in operator or architecture docs.
-
-The operator approved the public Zscaler root identified under Shared State.
-Only that matching public certificate was installed at
-`/usr/local/share/ca-certificates/factory-zscaler.crt`, followed by
-`update-ca-certificates`. Verified HTTPS then passed for all required source hosts;
-no private key was copied. This machine-specific trust step is not part of generic
-provisioning.
-
-APT authenticated Ubuntu metadata using the image's
-`/usr/share/keyrings/ubuntu-archive-keyring.gpg`. Research-only isolated source/list
-directories authenticated Docker and GitHub CLI InRelease/package indexes before
-installation. No package installation or upgrade occurred during that research.
-
-| Source | Suites/components | Signing identity |
-| --- | --- | --- |
-| `http://ports.ubuntu.com/ubuntu-ports` | noble, noble-updates, noble-security / main | Image-provided Ubuntu archive keyring. |
-| `https://download.docker.com/linux/ubuntu` | noble / stable | [Official key](https://download.docker.com/linux/ubuntu/gpg), primary fingerprint `9DC858229FC7DD38854AE2D88D81803C0EBFCD88`. |
-| `https://cli.github.com/packages` | stable / main | [Official keyring](https://cli.github.com/packages/githubcli-archive-keyring.gpg), current primary fingerprint `7F38BBB59D064DBCB3D84D725612B36462313325`; expired historical primary `2C6106201985B60E6C7AC87323F3D4EA75716059` was not the current signer. |
-
-Exact top-level package versions resolved from authenticated indexes:
-
-| Package | Version |
-| --- | --- |
-| git | `1:2.43.0-1ubuntu7.4` |
-| make | `4.3-4.1build2` |
-| sudo | `1.9.15p5-3ubuntu5.24.04.4` |
-| curl | `8.5.0-2ubuntu10.16` |
-| ca-certificates | `20260816ubuntu0.24.04.1` |
-| build-essential | `12.10ubuntu1` |
-| pkg-config | `1.8.1-2build1` |
-| libssl-dev | `3.0.13-0ubuntu3.16` |
-| zlib1g-dev | `1:1.3.dfsg-3.1ubuntu2.3` |
-| libbz2-dev | `1.0.8-5.1ubuntu0.1` |
-| libreadline-dev | `8.2-4build1` |
-| libsqlite3-dev | `3.45.1-1ubuntu2.8` |
-| libffi-dev | `3.4.6-1build1` |
-| liblzma-dev | `5.6.1+really5.4.5-1ubuntu0.4` |
-| libncurses-dev | `6.4+20240113-1ubuntu2.2` |
-| xz-utils | `5.6.1+really5.4.5-1ubuntu0.4` |
-| gnupg | `2.4.4-2ubuntu17.6` |
-| docker-ce | `5:29.9.2-1~ubuntu.24.04~noble` |
-| docker-ce-cli | `5:29.9.2-1~ubuntu.24.04~noble` |
-| containerd.io | `2.4.2-3~ubuntu.24.04~noble` |
-| docker-buildx-plugin | `0.38.1-1~ubuntu.24.04~noble` |
-| docker-compose-plugin | `5.6.1-1~ubuntu.24.04~noble` |
-| gh | `2.103.2` |
-
-Transitive OS dependencies were authenticated by APT, not fully snapshotted.
-Observed key-file SHA-256 values:
-
-- Docker ASCII key: `1500c1f56fa9e26b9b8f42452a553675796ade0807cdce11975eb98170b3a570`.
-- GitHub CLI binary keyring: `6084d5d7bd8e288441e0e94fc6275570895da18e6751f70f057485dc2d1a811b`.
-
-The guest downloaded the following archives and matched their SHA-256 values
-with HTTPS verification enabled:
-
-| Release | Official archive | SHA-256 and verification basis |
-| --- | --- | --- |
-| Python 3.14.3 | [python.org source](https://www.python.org/ftp/python/3.14.3/Python-3.14.3.tar.xz) | `a97d5549e9ad81fe17159ed02c68774ad5d266c72f8d9a0b5a9c371fe85d902b`, matching the digest in official adjacent `.sigstore` metadata. Checksum/HTTPS verification, not a Sigstore signature claim. |
-| Node.js 22.19.0 | [Official ARM64 archive](https://nodejs.org/dist/v22.19.0/node-v22.19.0-linux-arm64.tar.xz) | `0b2d9f564b6594222a62c82e1df2efe119dd4a4aff29644f4dd325bf360b6bcc`; `gpgv` verified detached `SHASUMS256.txt.sig` over `SHASUMS256.txt`, whose ARM64 entry matched. |
-| uv 0.5.13 | [Official ARM64 GNU archive](https://github.com/astral-sh/uv/releases/download/0.5.13/uv-aarch64-unknown-linux-gnu.tar.gz) | `d0054db9ba0ec472ee6d28fa3eda94fb021b5e77c962f3bb1ff4b4fa7934e66d`, matching the official adjacent `.sha256` asset. |
-
-Node signer Antoine du Hamel's fingerprint
-`5BE8A3F6C8A5C01D106C0AD820B1A390B168D356` was listed in the
-[versioned Node README](https://github.com/nodejs/node/blob/v22.19.0/README.md#release-keys).
-The key was downloaded from
-[keys.openpgp.org by full fingerprint](https://keys.openpgp.org/vks/v1/by-fingerprint/5BE8A3F6C8A5C01D106C0AD820B1A390B168D356),
-with key-file SHA-256 `3adca70e0239a43803df385987be8303ed9abb3c2fb203feeda31dc6a5256731`.
-The detached signature, not the earlier clear-signed-manifest experiment, was
-used for installation verification.
-
-The [npm registry release metadata](https://registry.npmjs.org/@earendil-works%2fpi-coding-agent/1.3.0)
-confirmed `@earendil-works/pi-coding-agent@1.3.0` and Node `>=22.19.0`.
-The downloaded tarball matched registry integrity
-`sha512-V/WoCjA2hQSe3QLWIUB24cTRdtEdeLiIzkDqU5RMXV6VWuD+KGZnzVBMhglwdnQTySkehZsjt8a3g6Jd2g4nnw==`;
-its SHA-256 was `ae2785e870b81a8c8e1d44510a57b5ee0bfc9e974679ac2faaada4aabee3d3c0`.
-Pi was installed under factory with npm integrity/TLS checks retained, without
-authentication.
+### Verification Evidence
+- Test-first failures proved missing host/effective-identity rejection, startup's old root initialization/UID override, missing rebuild/restart guidance, absent baked image identity, and failure on an existing image home before implementation. The initial focused set then passed all 75 tests.
+- Built `software-factory-agent:1.0.0` explicitly in the authorized local Lima guest; final immutable image ID is `sha256:9d2153ce3e03956cf00703c5a53afa64b9f27b7c96c0a67e89fe60e5e5f24049`. Base/tool versions and Debian snapshot pins are unchanged.
+- Initial image build failed PyPI certificate verification with Zscaler enabled. After the operator disabled Zscaler and requested a retry, the build passed with TLS verification enabled. No CA, trust-root, credential, source, or verification-bypass change was made.
+- The first built image's real tests caught root ownership of npm's intermediate `.local` directory. Explicitly creating that directory as factory fixed it; a rebuild passed. Real negative-image tests also caught a missing npm-bin writability check and shell `set -e` suppression in chained directory tests. After reproducing both failures, separate fail-closed checks reject missing/nonwritable cache/prefix/bin directories.
+- The 23 real startup/image checks pass, including actual factory UID/GID/name, baked directories and native tools, root HOME under sudo, denied sudo for another account, wrong/root image identity, missing account, broken tools/sudo, and incompatible home/cache/prefix/bin with cleanup. The real CLI observes idle polling using scripted authentication/GitHub boundaries, preserves previous diagnostics, claims no issues, and exits 130 on SIGTERM. Final engine inspection found no `factory-startup-*` leftovers.
+- `FACTORY_DOCKER_TESTS=1 FACTORY_AGENT_IMAGE_TESTS=1 ./scripts/verify` inside the Lima guest as factory 2000:2000 passed format → lint → tests/coverage: **361 passed, 3 skipped**, Python overall line/branch **99.35%**, above the prior **99.34%** baseline and unchanged **80%** gate. Skips are macOS/Lima-on-host-only checks and the separately authorized provisioning test; no provisioning was rerun.
+- Existing real Docker execution and four issue-CLI outcomes passed under the new image: ordinary builds/Compose services, target-installed tool, socket/sibling mounts, host file access, scoped cleanup/sentinels, setup/verification/deadline failures, inaccessible output, interruption, and create-only local-Git/scripted-PR publication. These still use the old per-run initializer and do not establish US-10 supplementary-group acceptance.
+- macOS `./scripts/verify` passed format → lint → tests/coverage: **320 passed, 44 skipped**, **99.35%** coverage. Skips are opt-in Docker/image/provisioning tests; the real Docker/image tests ran in Lima instead. CLI `--help` passed without polling.
+- `git diff --check`, Markdown whitespace/fences, **24 local links/anchors**, and `bash -n` on both CI shell blocks passed. CI now stages a fresh factory-owned checkout, grants Docker membership but no host sudo, and runs setup/build/verification through explicit factory identity with both Docker opt-ins passed across sudo's environment boundary. Hosted GitHub Actions itself was not run; no commit/push was authorized.
+- Test staging initially carried macOS AppleDouble metadata, causing Ruff to reject synthetic `._*.py` files in the guest. A fresh stage transferred with xattrs disabled fixed the harness; repository code/check configuration was not changed to ignore those files. Final native checkout: `/home/factory/us09.lJzOOBOJ`. Earlier stage `/home/factory/us09.ttM6PdUv` and private logs in host `artifacts/us09.ZSUoU7/` remain for operator inspection; no previous artifacts or shared image/cache resources were deleted.
 
 ## Not Now
-- US-09 fixed host/image startup validation, baked image account/home/sudo, and fixed-identity ARM64 CI execution.
-- US-10 actual agent exec supplementary socket membership, runtime account initialization removal, issue-to-PR regression, and full service/browser evidence.
-- US-06 verification repairs and US-07 full manual-requeue acceptance are outside the migration backlog.
-- Automatic authentication, live Copilot/GitHub checks, runner-managed provisioning, paid resources, general host passwordless sudo, account/artifact migration, permission repair, image build, or runner startup.
-- Cloud access/allocation remains unauthorized. No live authentication, commit, or push was performed.
+- US-10 issue-run initialization removal, socket GID discovery/`--group-add`, actual exec supplementary-group feasibility, issue-to-draft-PR migration acceptance, and macOS browser-to-VM fixture-service evidence.
+- Verification repairs, full manual-requeue acceptance, new coordination/publication behavior, or changes to the original deadline.
+- Arbitrary host identities, direct macOS runner support, parallel backends, automatic migration, workspace permission repair, automatic image builds/pulls, or general host passwordless sudo.
+- Reprovisioning/allocating the VM, changing trust roots, new network exposure, cloud resources, or live authenticated Copilot/GitHub access.
+- Changes to VM allocation, host provisioning, credentials, trust roots, or network settings remain unauthorized; use only the existing guest and the explicitly authorized test checkout/dependencies/image build.
 
 ## Done When
-- The authorized local Lima Ubuntu ARM64 host reaches independently checked readiness through the explicit provisioning entrypoint; no separate production-like deployment/testing is required.
-- Repeated provisioning preserves correct state/credentials/repositories/diagnostics; conflicts, failed verification/installations, and unusable Docker access report failure rather than readiness.
-- Tools use the accepted sources/pins and recorded verification evidence, without replacing system Python, silently substituting versions, or automatically upgrading.
-- Manual authentication and later image build/startup remain separate; instructions accurately distinguish delivery from outstanding migration work.
-- Required real readiness checks, failure regressions, formatting, lint, documentation checks, and the unchanged coverage gate pass.
+- The supported fixed-identity host and compatible baked image reach polling through the unchanged CLI/TOML path, demonstrated by the real local-Lima CLI E2E with scripted external-service boundaries.
+- Unsupported hosts/root/wrong IDs and incompatible images fail before claims with safe actionable diagnostics, without account switching, runtime startup account mutation, permission repair, or fallback.
+- Startup retains artifact/authentication checks, immutable native local image selection, bounded probe cleanup, polling, and interruption behavior; cleanup failure blocks startup.
+- ARM64 CI runs verification as factory 2000:2000, affected existing regressions pass, coverage meets the unchanged gate, and durable instructions match the supported startup behavior.
+- US-10's distinct issue-execution outcome remains deferred; no live-service acceptance is claimed.
 
 ## Completion Summary
-- The operator can explicitly prepare/check the local Lima host with fixed identity `factory` 2000:2000, verified pinned tools, writable home, and actual native local Docker access, ready for manual authentication.
-- Repeated provisioning preserves correct installations and retained source/diagnostic files; invalid inputs, unverifiable releases, installation failures, and unusable access fail visibly without account/permission repair or false readiness.
-- Completed under the operator-approved local-VM-only scope. No cloud validation, authentication, image/startup/execution migration, commit, or push is claimed.
+- The operator can start the unchanged CLI/TOML on the provisioned host as factory 2000:2000 and reach polling after validating the baked image's actual identity, writable directories, native tools, and explicit sudo. Startup no longer configures accounts or overrides the image user; unsupported hosts/identities and incompatible images fail before claims with rebuild/restart guidance.
+- Required startup cleanup, artifact preservation, interruption, existing issue-execution regressions, and the unchanged coverage gate pass in the local Lima acceptance environment. No live provider/GitHub access, CA changes, provisioning, commit, or push was performed.
 
 ## Next Slice Recommendation
-- `US-09 Start the runner with the fixed factory identity`: validate the provisioned host and baked image identity through startup-to-polling with scripted authentication/GitHub boundaries. Keep `US-10 Execute issue runs without runtime account initialization` in view for actual exec socket groups and obsolete initialization removal, without including that outcome in US-09. Both use local Lima acceptance; do not reintroduce separate production-like host testing.
+- `US-10 Execute issue runs without runtime account initialization`: remove the remaining per-run initializer/callers/obsolete fixtures and prove socket GID discovery plus `--group-add` through actual exec before relying on it. Preserve existing first-pass issue-to-draft-PR behavior, and add the distinct migration E2E and macOS-browser-to-VM-service evidence. Return to the operator if the accepted supplementary-group mechanism fails; do not add a root/account-mutation fallback. No other explicit migration story follows US-10.

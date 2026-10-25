@@ -63,9 +63,12 @@ docker build --platform linux/arm64 -t software-factory-agent:1.0.0 agent
 FACTORY_DOCKER_TESTS=1 FACTORY_AGENT_IMAGE_TESTS=1 ./scripts/verify
 ```
 
+Run these Docker/CLI checks inside the provisioned Ubuntu 24.04 ARM64 guest as
+`factory` (UID/GID **2000:2000**). Unit checks can still run on a development host.
 `FACTORY_AGENT_IMAGE` overrides the already-built fixture image reference for both
 Docker suites. [CI](.github/workflows/verify.yml) uses `ubuntu-24.04-arm`, Python
-3.14.3 and uv 0.5.13; it explicitly builds the image before verifying.
+3.14.3 and uv 0.5.13; it stages a fresh factory-owned checkout and explicitly builds
+the image and verifies as `factory` 2000:2000, without granting host sudo to that account.
 The runner itself never builds/pulls the shared image.
 
 [Docker tests](tests/test_docker_integration.py) exercise actual target builds,
@@ -101,17 +104,22 @@ Authentication remains manual. Provisioning failures report a private command-lo
 path; inspect it without publishing transcripts. For HTTPS trust failures, obtain
 operator approval for the correct CA rather than disabling verification.
 
+Run inside the provisioned **Ubuntu 24.04 LTS ARM64 Lima guest** as `factory`,
+with effective UID/GID **2000:2000**. Root, other identities, other host operating
+systems/releases, and direct macOS runner execution are rejected before polling.
 Startup requires Git, authenticated GitHub CLI, authenticated host Pi/Copilot
 (tested Pi **1.3.0**), and a running **local native Linux ARM64** Docker engine.
-Apple Silicon with Rancher Desktop/Docker Desktop is supported; remote engines
-and factory-selected emulation fallbacks are not. Docker must use an absolute
-local Unix socket endpoint.
+Remote engines and factory-selected emulation fallbacks are unsupported. Docker
+must use an absolute local Unix socket endpoint. Keep the checkout and artifacts
+on the guest's Linux disk; do not execute from macOS shared folders.
 Explicit `DOCKER_CONTEXT` takes precedence over `DOCKER_HOST`; otherwise the host
 override or active context selects the engine. Authentication/access approval
 remains manual. Only one runner may operate on a configured repository; labels
 are not a distributed lock.
 
-1. Build the credential-free [shared image](agent/README.md):
+1. Log in as the provisioned factory account (for example, an administrator can
+   explicitly run `sudo -iu factory`), then use a factory-owned checkout on the
+   guest's Linux disk. Build the credential-free [shared image](agent/README.md):
 
    ```sh
    docker build --platform linux/arm64 -t software-factory-agent:1.0.0 agent
@@ -140,9 +148,13 @@ are not a distributed lock.
    uv run --frozen python -m software_factory --config /absolute/path/to/factory.toml
    ```
 
-   Startup checks artifact-root usability, host tools, local engine architecture,
-   GitHub authentication, Copilot bearer endpoint/lifetime, local image architecture,
-   and native tool execution with writable home/caches and `sudo -n`.
+   Startup first validates the supported host and effective identity, then checks
+   artifact-root usability, host tools, local engine architecture, GitHub
+   authentication, Copilot bearer endpoint/lifetime, local image architecture,
+   and actual baked factory account/home/caches/npm prefix, native tools, and
+   `sudo -n` with root HOME. The startup probe uses the image's default identity
+   without runtime account initialization. Rebuild old/incompatible images and
+   restart; startup never switches accounts or repairs permissions.
    Cleanup errors block startup; inspect named `factory-startup-*` leftovers only.
 
    The image resolves once to an immutable session ID. Restart to adopt a rebuilt
@@ -186,7 +198,7 @@ nonbaseline tools/browser binaries **inside the agent**, not on the host. Both
 scripts must exist before implementation; there is no setup repair or Pi bootstrap.
 Do not reuse host macOS `.venv`/`node_modules` as Linux dependencies.
 
-Setup, Pi, and verification run as your numeric host UID/GID, with a writable
+Setup, Pi, and verification run as factory UID/GID **2000:2000**, with a writable
 container-local home, caches, and user-local tool path. Use explicit `sudo -n` for
 system installs, not whole setup scripts or project builds. Permission errors do
 not trigger automatic elevation. For example:
@@ -198,15 +210,17 @@ npm ci
 uv sync --frozen
 ```
 
-**Upgrade:** explicitly rebuild the shared image and restart the runner.
-Setup scripts must use explicit `sudo -n` for system installs and the user-local
-prefix for npm tools. Workspace ownership and permissions are never repaired
-automatically. Matching numeric user IDs is not a security boundary.
+**Upgrade:** explicitly rebuild the shared image and restart the runner. It bakes
+in factory 2000:2000, home/caches, the npm prefix, and account-scoped sudo; images
+from the arbitrary-host-user model are incompatible. There is no automatic
+account/configuration/artifact migration. Setup scripts must use explicit `sudo -n`
+for system installs and the user-local prefix for npm tools. Workspace ownership
+and permissions are never repaired automatically. Matching numeric user IDs is
+not a security boundary.
 
 The agent mounts the workspace at its same absolute host/container path and
-connects to the selected local engine. On macOS the engine-side socket mount is
-`/var/run/docker.sock`, not the host provider's proxy socket. On Linux it uses the
-resolved local socket path. Only the workspace and engine socket are ordinary
+connects to the selected local engine. The engine socket mount uses the
+resolved local Linux socket path. Only the workspace and engine socket are ordinary
 binds; host Git metadata, GitHub publication credentials, broader Pi settings, and
 refresh credentials are not normal agent inputs. Copilot bearer delivery is stdin
 only, using validated endpoint metadata and exact-model nonpersistent invocation.
@@ -268,9 +282,9 @@ to modify that guest; it is not an ordinary non-mutating test. Configuration-onl
 validation skips where Lima is absent.
 
 Docker/CLI tests use real local dependencies and scripted Pi/GitHub boundaries;
-they make no live Copilot request or GitHub write. Linux CI alone does not verify
-macOS-to-VM service access. Live authenticated checks require separate explicit
-approval.
+they make no live Copilot request or GitHub write. Run them as factory 2000:2000
+inside the Lima guest; Linux CI alone does not verify macOS-to-VM service access.
+Live authenticated checks require separate explicit approval.
 
 ## Architecture and repository structure
 

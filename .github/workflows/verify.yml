@@ -10,9 +10,6 @@ permissions:
 jobs:
   verify:
     runs-on: ubuntu-24.04-arm
-    env:
-      FACTORY_DOCKER_TESTS: "1"
-      FACTORY_AGENT_IMAGE_TESTS: "1"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -21,6 +18,25 @@ jobs:
       - uses: astral-sh/setup-uv@v5
         with:
           version: "0.5.13"
-      - run: ./scripts/setup
-      - run: docker build --platform linux/arm64 -t software-factory-agent:1.0.0 agent
-      - run: ./scripts/verify
+      - name: Prepare fixed CI identity and fresh Linux checkout
+        run: |
+          if getent passwd factory || getent passwd 2000 || getent group factory || getent group 2000; then
+            echo 'CI factory name/ID conflict; refusing account migration' >&2
+            exit 1
+          fi
+          sudo groupadd --gid 2000 factory
+          sudo useradd --uid 2000 --gid 2000 --create-home --shell /bin/bash factory
+          sudo usermod --append --groups "$(stat -c %G /var/run/docker.sock)" factory
+          sudo install -m 0755 "$(command -v uv)" /usr/local/bin/uv
+          sudo -u factory mkdir /home/factory/checkout
+          tar --exclude=.git -cf - . | sudo -u factory tar -xf - -C /home/factory/checkout
+      - name: Setup, build, and verify as factory 2000:2000
+        run: |
+          sudo runuser -u factory -- env "PATH=$PATH" HOME=/home/factory \
+            FACTORY_DOCKER_TESTS=1 FACTORY_AGENT_IMAGE_TESTS=1 sh -ec '
+            cd /home/factory/checkout
+            test "$(id -u):$(id -g)" = 2000:2000
+            ./scripts/setup
+            docker build --platform linux/arm64 -t software-factory-agent:1.0.0 agent
+            ./scripts/verify
+          '

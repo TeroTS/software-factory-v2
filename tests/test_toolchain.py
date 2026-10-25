@@ -10,6 +10,22 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def test_image_bakes_fixed_factory_identity_and_scoped_sudo() -> None:
+    dockerfile = (ROOT / "agent/Dockerfile").read_text()
+    assert "groupadd --gid 2000 factory" in dockerfile
+    assert "useradd --uid 2000 --gid 2000" in dockerfile
+    assert "factory ALL=(root) NOPASSWD: ALL" in dockerfile
+    assert "'ALL ALL=(root) NOPASSWD: ALL'" not in dockerfile
+    assert "Defaults:factory always_set_home" in dockerfile
+    assert "USER factory:factory" in dockerfile
+    for value in (
+        "HOME=/tmp/factory-home",
+        "XDG_CACHE_HOME=/tmp/factory-home/.cache",
+        "NPM_CONFIG_PREFIX=/tmp/factory-home/.local",
+    ):
+        assert value in dockerfile
+
+
 def test_coverage_policy() -> None:
     config = tomllib.loads((ROOT / "pyproject.toml").read_text())
     assert config["tool"]["coverage"]["run"]["source"] == ["src"]

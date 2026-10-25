@@ -57,8 +57,11 @@ uv run --frozen pytest tests/test_toolchain.py -q
 - No standalone type checker or Markdown linter is configured. Packaging uses the
   pinned backend; there is no release workflow.
 
-CI-equivalent checks run on native ARM64 with local Docker/Compose and an
-explicitly built shared image. Target fixtures build ordinary application images,
+CI-equivalent Docker/CLI checks run inside the provisioned Ubuntu 24.04 ARM64
+Lima guest as factory 2000:2000, with local Docker/Compose and an explicitly built
+shared image. CI stages a fresh factory-owned checkout and verifies as that same
+identity without granting the account host sudo. Unit checks can run on a
+development host. Target fixtures build ordinary application images,
 install a local npm tool inside the agent, and verify against real Compose services.
 
 ```sh
@@ -82,11 +85,18 @@ approval. See [README live checks](README.md#verification-beyond-unit-tests).
   `artifacts_dir`; no credentials/defaults. Relative artifact paths resolve against
   the TOML; model IDs exactly match an accessible `github-copilot` model. Reject
   legacy Compose fields with migration guidance; never automatically migrate.
-- Host execution needs Git, authenticated `gh`, authenticated Pi/Copilot (tested
-  Pi **1.3.0**), and Docker Compose. Authentication/access approval is manual.
+- Runner execution requires the provisioned Ubuntu 24.04 LTS ARM64 Linux host
+  and effective factory UID/GID 2000:2000. Reject root/other IDs and unsupported
+  hosts before claims; never switch accounts or elevate the host runner.
+  Git, authenticated `gh`, authenticated Pi/Copilot (tested Pi **1.3.0**), and
+  Docker Compose are required. Authentication/access approval is manual.
 - The operator builds the shared `agent/Dockerfile` image before startup. Require
   a local native linux/arm64 engine/image and retain the resolved immutable image
-  ID for the session. Factory-owned containers request `--platform linux/arm64`
+  ID for the session. Bake factory 2000:2000, writable home/caches/npm prefix,
+  and account-scoped sudo with root HOME into the image. Startup validates the
+  actual default identity without root account setup or account-file mutation;
+  incompatible images require explicit rebuild/restart, not compatibility repair.
+  Factory-owned containers request `--platform linux/arm64`
   and `--pull=never`; target commands inherit `DOCKER_DEFAULT_PLATFORM=linux/arm64`
   and use the image's unmodified Docker executable. Target scripts must use native
   images/tools; explicit platform overrides are not intercepted and may invoke
@@ -121,10 +131,10 @@ approval. See [README live checks](README.md#verification-beyond-unit-tests).
   no automatic retries/requeue, session recovery, merging, or review-feedback revisions.
 - Task inputs are the immutable title/body snapshot and repository contents, not
   comments, attachments, or linked pages. Treat inputs/output as untrusted data.
-- Setup → Pi → verification run inside the agent as the host UID/GID, with writable
+- Setup → Pi → verification run inside the agent as factory 2000:2000, with writable
   container-local home/caches and explicit `sudo -n` for system installs. No automatic
-  root fallback or recursive workspace permission repair. Trusted root initialization
-  configures only container account/home/socket groups; never run workspace code in it.
+  root fallback or recursive workspace permission repair. Do not introduce runtime
+  account/shadow/group initialization; never execute workspace code in root initialization.
   Host publication requires successful verification, completed scoped cleanup,
   required host file access, remaining time, and a nonempty diff. Preserve the original 900-second
   deadline across all phases/repairs and attempt bounded cleanup after failure.

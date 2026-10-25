@@ -88,11 +88,19 @@ def test_missing_socket_only_configures_primary_group(account_files) -> None:
     assert groups[1].split(":")[2] == "234"
 
 
+def test_baked_home_contents_are_preserved(account_files) -> None:
+    root, run, _, _ = account_files
+    (root / "home" / ".cache").mkdir(parents=True)
+    (root / "home" / ".cache" / "sentinel").write_text("baked content")
+    run(uid=2000, gid=2000)
+    assert (root / "home" / ".cache" / "sentinel").read_text() == "baked content"
+
+
 @pytest.mark.parametrize("failure", ["home", "ownership", "passwd", "shadow", "group"])
 def test_filesystem_failures_propagate_without_retry(account_files, failure) -> None:
     root, run, chown, _ = account_files
     if failure == "home":
-        (root / "home").mkdir()
+        (root / "home").write_text("not a directory")
     elif failure == "ownership":
         chown.side_effect = PermissionError("ownership denied")
     else:

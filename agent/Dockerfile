@@ -31,14 +31,23 @@ RUN printf '%s\n' \
     && npm install --global --ignore-scripts @earendil-works/pi-coding-agent@1.3.0 \
     && npm cache clean --force
 
-# Allow explicit noninteractive system installs; ordinary issue commands use the host UID/GID.
+# Bake the fixed identity and private writable home; scope explicit system-install elevation to factory.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends sudo \
-    && printf '%s\n' 'Defaults always_set_home' 'ALL ALL=(root) NOPASSWD: ALL' > /etc/sudoers.d/factory \
+    && groupadd --gid 2000 factory \
+    && useradd --uid 2000 --gid 2000 --home-dir /tmp/factory-home --shell /bin/bash factory \
+    && install -d -m 0700 -o factory -g factory /tmp/factory-home \
+    && install -d -m 0755 -o factory -g factory \
+      /tmp/factory-home/.cache /tmp/factory-home/.local /tmp/factory-home/.local/bin \
+    && printf '%s\n' 'Defaults:factory always_set_home' 'factory ALL=(root) NOPASSWD: ALL' > /etc/sudoers.d/factory \
     && chmod 0440 /etc/sudoers.d/factory \
     && visudo -cf /etc/sudoers.d/factory \
     && rm -rf /var/lib/apt/lists/*
 
-ENV UV_LINK_MODE=copy
+ENV UV_LINK_MODE=copy \
+    HOME=/tmp/factory-home \
+    XDG_CACHE_HOME=/tmp/factory-home/.cache \
+    NPM_CONFIG_PREFIX=/tmp/factory-home/.local \
+    PATH=/tmp/factory-home/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 WORKDIR /tmp
-USER root
+USER factory:factory

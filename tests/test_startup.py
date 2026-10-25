@@ -1,5 +1,4 @@
 import json
-import os
 import time
 from pathlib import Path
 from unittest.mock import Mock
@@ -24,6 +23,11 @@ def startup(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         "Copilot authentication": f"proxy-ep=proxy.business.githubcopilot.com;exp={int(time.time()) + 1800}",
     }
     commands.run.side_effect = lambda args, phase, **kwargs: responses.get(phase, "")
+    monkeypatch.setattr("platform.system", lambda: "Linux")
+    monkeypatch.setattr("platform.machine", lambda: "aarch64")
+    monkeypatch.setattr("platform.freedesktop_os_release", lambda: {"ID": "ubuntu", "VERSION_ID": "24.04"})
+    monkeypatch.setattr("software_factory.runner.os.geteuid", lambda: 2000)
+    monkeypatch.setattr("software_factory.runner.os.getegid", lambda: 2000)
     monkeypatch.setattr("software_factory.runner.shutil.which", lambda tool: "/bin/" + tool)
     monkeypatch.setattr("software_factory.runner.Commands", Mock(return_value=commands))
     monkeypatch.delenv("DOCKER_HOST", raising=False)
@@ -133,7 +137,6 @@ def test_malformed_or_incompatible_engine_and_image_fail_startup(startup, phase:
         "GitHub authentication",
         "Copilot authentication",
         "startup agent",
-        "agent user configuration",
         "agent runtime",
         "startup cleanup",
     ],
@@ -209,13 +212,21 @@ def test_artifact_probe_failure_is_safe(startup, monkeypatch) -> None:
     assert "secret" not in str(failure.value)
 
 
-def test_startup_checks_tools_home_and_sudo_as_host_user(startup) -> None:
+def test_startup_checks_baked_identity_tools_home_and_sudo_without_user_initialization(startup) -> None:
     preflight(startup[0])
     calls = startup[1].run.call_args_list
     runtime = next(call.args[0] for call in calls if call.args[1] == "agent runtime")
-    assert runtime[:5] == ["docker", "exec", "--user", str(os.getuid()), "-i"]
+    assert runtime[:3] == ["docker", "exec", "-i"]
     assert "sudo -n" in runtime[-1]
     assert 'test -w "$HOME"' in runtime[-1]
+    assert 'test "$(id -u)" = 2000' in runtime[-1]
+    assert 'test "$(id -g)" = 2000' in runtime[-1]
+    assert 'test "$(id -un)" = factory' in runtime[-1]
+    assert 'test -w "$NPM_CONFIG_PREFIX"' in runtime[-1]
+    assert 'test "$HOME" = /root' in runtime[-1]
+    probe = next(call.args[0] for call in calls if call.args[1] == "startup agent")
+    assert "--user" not in probe and "--env" not in probe
+    assert "agent user configuration" not in [call.args[1] for call in calls]
     assert calls[-1].args[1] == "startup cleanup"
 
 
@@ -255,3 +266,61 @@ def test_runner_polls_every_thirty_seconds_and_survives_discovery_errors(startup
     assert [call.args for call in sleep.call_args_list] == [(30,), (30,)]
     assert "GitHub unavailable" in caplog.text
     assert "first-pass execution active" in caplog.text
+
+
+@pytest.mark.parametrize("uid,gid", [(0, 0), (0, 2000), (2000, 0), (1000, 2000), (2000, 1000)])
+def test_wrong_effective_identity_fails_before_artifacts_or_commands(startup, monkeypatch, uid, gid) -> None:
+    config, commands, _ = startup
+    monkeypatch.setattr("software_factory.runner.os.geteuid", lambda: uid)
+    monkeypatch.setattr("software_factory.runner.os.getegid", lambda: gid)
+    with pytest.raises(FactoryError, match="factory.*2000:2000"):
+        preflight(config)
+    commands.run.assert_not_called()
+    assert not config.artifacts_dir.exists()
+
+
+@pytest.mark.parametrize(
+    "system,machine,release",
+    [
+        ("Darwin", "arm64", {}),
+        ("Linux", "x86_64", {"ID": "ubuntu", "VERSION_ID": "24.04"}),
+        ("Linux", "aarch64", {"ID": "debian", "VERSION_ID": "12"}),
+        ("Linux", "aarch64", {"ID": "ubuntu", "VERSION_ID": "22.04"}),
+        ("Linux", "aarch64", {}),
+    ],
+)
+def test_unsupported_host_fails_before_artifacts_or_commands(startup, monkeypatch, system, machine, release) -> None:
+    config, commands, _ = startup
+    monkeypatch.setattr("platform.system", lambda: system)
+    monkeypatch.setattr("platform.machine", lambda: machine)
+    monkeypatch.setattr("platform.freedesktop_os_release", lambda: release)
+    with pytest.raises(FactoryError, match="Ubuntu 24.04.*ARM64"):
+        preflight(config)
+    commands.run.assert_not_called()
+    assert not config.artifacts_dir.exists()
+
+
+def test_unreadable_host_release_fails_safely(startup, monkeypatch) -> None:
+    config, commands, _ = startup
+    monkeypatch.setattr("platform.freedesktop_os_release", Mock(side_effect=OSError("private detail")))
+    with pytest.raises(FactoryError, match="Ubuntu 24.04.*ARM64") as error:
+        preflight(config)
+    assert "private detail" not in str(error.value)
+    commands.run.assert_not_called()
+    assert not config.artifacts_dir.exists()
+
+
+def test_incompatible_runtime_guides_explicit_rebuild_and_restart(startup) -> None:
+    config, commands, responses = startup
+
+    def run(args, phase, **kwargs):
+        if phase == "agent runtime":
+            raise FactoryError("private failure")
+        return responses.get(phase, "")
+
+    commands.run.side_effect = run
+    with pytest.raises(FactoryError, match="rebuild.*restart") as error:
+        preflight(config)
+    assert "2000:2000" in str(error.value)
+    assert "private failure" not in str(error.value)
+    assert commands.run.call_args.args[1] == "startup cleanup"

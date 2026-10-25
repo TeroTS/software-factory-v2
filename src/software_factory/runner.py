@@ -2,6 +2,7 @@
 import json
 import logging
 import os
+import platform
 import re
 import shutil
 import tempfile
@@ -14,17 +15,30 @@ from software_factory.config import Config
 from software_factory.github import GitHub
 from software_factory.process import Commands, FactoryError
 from software_factory.repository import Repository
-from software_factory.sandbox import PI_FLAGS, Sandbox, configure_user, copilot_endpoint
+from software_factory.sandbox import PI_FLAGS, Sandbox, copilot_endpoint
 
 LOGGER = logging.getLogger("software_factory")
 
 # Smoke-run baseline tools without mounts, credentials, network access, or target repository commands.
 RUNTIME_CHECK = """set -eu
- test "$(id -u)" = "$(stat -c %u "$HOME")"
+ test "$(id -u)" = 2000
+ test "$(id -g)" = 2000
+ test "$(id -un)" = factory
+ test "$(id -gn)" = factory
+ test "$(getent passwd factory | cut -d: -f3-4)" = 2000:2000
+ test "$HOME" = /tmp/factory-home
+ test "$(stat -c %u:%g "$HOME")" = 2000:2000
  test -w "$HOME"
- mkdir -p "$XDG_CACHE_HOME"
+ test "$XDG_CACHE_HOME" = "$HOME/.cache"
+ test -d "$XDG_CACHE_HOME"
  test -w "$XDG_CACHE_HOME"
- sudo -n true
+ test "$NPM_CONFIG_PREFIX" = "$HOME/.local"
+ test -d "$NPM_CONFIG_PREFIX"
+ test -w "$NPM_CONFIG_PREFIX"
+ test -d "$NPM_CONFIG_PREFIX/bin"
+ test -w "$NPM_CONFIG_PREFIX/bin"
+ case "$PATH" in "$NPM_CONFIG_PREFIX/bin":*) ;; *) exit 1 ;; esac
+ sudo -n sh -ec 'test "$(id -u)" = 0; test "$HOME" = /root'
  test "$(uname -m)" = aarch64
  for tool in pi node npm docker python uv bash git make cc c++ curl tar; do "$tool" --version >/dev/null; done
  unzip -v >/dev/null
@@ -86,6 +100,16 @@ def copilot_bearer(commands: Commands, directory: Path) -> str:
 # Validate artifacts, host prerequisites, native local image, and actual tool execution before polling.
 def preflight(config: Config) -> AgentRuntime:
     try:
+        if platform.system() != "Linux" or platform.machine() != "aarch64":
+            raise ValueError
+        release = platform.freedesktop_os_release()
+        if release.get("ID") != "ubuntu" or release.get("VERSION_ID") != "24.04":
+            raise ValueError
+    except OSError, ValueError:
+        raise FactoryError("runner requires the provisioned Ubuntu 24.04 LTS ARM64 Linux host") from None
+    if (os.geteuid(), os.getegid()) != (2000, 2000):
+        raise FactoryError("start the runner as factory with effective UID/GID 2000:2000; root is unsupported")
+    try:
         config.artifacts_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
         with tempfile.TemporaryFile(dir=config.artifacts_dir) as probe:
             probe.write(b"factory startup\n")
@@ -135,12 +159,6 @@ def preflight(config: Config) -> AgentRuntime:
                 "--detach",
                 "--name",
                 name,
-                "--user",
-                f"{os.getuid()}:{os.getgid()}",
-                "--env",
-                "HOME=/tmp/factory-home",
-                "--env",
-                "XDG_CACHE_HOME=/tmp/factory-home/.cache",
                 "--pull=never",
                 "--platform",
                 "linux/arm64",
@@ -154,17 +172,16 @@ def preflight(config: Config) -> AgentRuntime:
             "startup agent",
             env=env,
         )
-        configure_user(name, commands, env)
         commands.run(
-            ["docker", "exec", "--user", str(os.getuid()), "-i", name, "sh", "-ec", RUNTIME_CHECK],
+            ["docker", "exec", "-i", name, "sh", "-ec", RUNTIME_CHECK],
             "agent runtime",
             env=env,
         )
     except FactoryError:
         failed = True
         raise FactoryError(
-            "agent runtime check failed: rebuild the shared image with sudo and the documented native tools; "
-            "check host-user execution and writable container home"
+            "agent runtime check failed: rebuild the shared image, then restart; require factory 2000:2000, "
+            "writable container home/caches/npm prefix, sudo -n with root HOME, and the documented native tools"
         ) from None
     except KeyboardInterrupt:
         failed = True

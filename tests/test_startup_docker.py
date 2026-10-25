@@ -26,6 +26,7 @@ pytestmark = [
 def test_shared_image_has_pinned_native_baseline_and_no_credentials() -> None:
     inspected = json.loads(subprocess.check_output(["docker", "image", "inspect", IMAGE], text=True))[0]
     assert inspected["Os"] == "linux" and inspected["Architecture"] == "arm64"
+    assert inspected["Config"]["User"] == "factory:factory"
     assert not inspected["Config"].get("Volumes")
     assert not any(variable.startswith("UV_PYTHON_DOWNLOADS=") for variable in inspected["Config"]["Env"])
     assert not any(
@@ -35,6 +36,15 @@ def test_shared_image_has_pinned_native_baseline_and_no_credentials() -> None:
     )
     script = """set -eu
     test "$(uname -m)" = aarch64
+    test "$(id -u):$(id -g):$(id -un):$(id -gn)" = 2000:2000:factory:factory
+    test "$(getent passwd factory | cut -d: -f3-4)" = 2000:2000
+    test "$(getent group factory | cut -d: -f3)" = 2000
+    test "$HOME" = /tmp/factory-home
+    touch "$HOME/home-write" "$XDG_CACHE_HOME/cache-write"
+    touch "$NPM_CONFIG_PREFIX/prefix-write" "$NPM_CONFIG_PREFIX/bin/tool-write"
+    sudo -n sh -ec 'test "$(id -u)" = 0; test "$HOME" = /root'
+    printf '%s\\n' 'Defaults:factory always_set_home' 'factory ALL=(root) NOPASSWD: ALL' > /tmp/expected-sudo
+    sudo -n cmp /etc/sudoers.d/factory /tmp/expected-sudo
     test "$(node --version)" = v22.19.0
     test "$(npm --version)" = 10.9.3
     test "$(python --version)" = 'Python 3.14.3'
@@ -72,6 +82,33 @@ def test_shared_image_has_pinned_native_baseline_and_no_credentials() -> None:
     )
 
 
+def test_image_does_not_grant_sudo_to_other_accounts() -> None:
+    result = subprocess.run(
+        [
+            "docker",
+            "run",
+            "--rm",
+            "--pull=never",
+            "--platform",
+            "linux/arm64",
+            "--network",
+            "none",
+            "--user",
+            "65534:65534",
+            "--entrypoint",
+            "sudo",
+            IMAGE,
+            "-n",
+            "true",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert result.returncode != 0
+    assert "sudo" in result.stderr
+
+
 @pytest.mark.parametrize("tool", ["npm", "bash", "git", "make", "cc", "c++", "curl", "tar", "unzip", "sudo"])
 def test_startup_rejects_broken_required_tool_and_removes_probe(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, tool: str
@@ -106,6 +143,53 @@ def test_startup_rejects_broken_required_tool_and_removes_probe(
     containers = subprocess.check_output(["docker", "ps", "-aq", "--filter", f"name=^{name}$"], text=True)
     assert not containers.strip(), "failed startup probe left a container behind"
     assert list(config.artifacts_dir.iterdir()) == []
+
+
+@pytest.mark.parametrize(
+    "defect",
+    ["root", "wrong-uid", "wrong-gid", "home", "cache", "prefix", "bin", "account", "missing-cache", "missing-bin"],
+)
+def test_startup_rejects_incompatible_identity_or_home_without_runtime_repair(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, defect: str
+) -> None:
+    names = []
+
+    class IncompatibleImage(Commands):
+        def run(self, args, phase, **kwargs):
+            if phase == "GitHub authentication":
+                return ""
+            if phase == "Copilot authentication":
+                return f"proxy-ep=proxy.business.githubcopilot.com;exp={int(time.time()) + 1800}"
+            if phase == "startup agent":
+                names.append(args[args.index("--name") + 1])
+                if defect in {"root", "wrong-uid", "wrong-gid"}:
+                    user = {"root": "0:0", "wrong-uid": "2001:2000", "wrong-gid": "2000:2001"}[defect]
+                    args = [*args[:2], "--user", user, *args[2:]]
+            if phase == "agent runtime" and defect not in {"root", "wrong-uid", "wrong-gid"}:
+                mutation = {
+                    "home": "chmod 0555 /tmp/factory-home",
+                    "cache": "chmod 0555 /tmp/factory-home/.cache",
+                    "prefix": "chmod 0555 /tmp/factory-home/.local",
+                    "bin": "chmod 0555 /tmp/factory-home/.local/bin",
+                    "account": "sed -i 's/^factory:/old-factory:/' /etc/passwd",
+                    "missing-cache": "rmdir /tmp/factory-home/.cache",
+                    "missing-bin": "rmdir /tmp/factory-home/.local/bin",
+                }[defect]
+                super().run(
+                    ["docker", "exec", "--user", "0:0", names[0], "sh", "-ec", mutation],
+                    "break fixture image",
+                    env=kwargs["env"],
+                )
+            assert phase != "agent user configuration", "startup must not repair incompatible images"
+            return super().run(args, phase, **kwargs)
+
+    monkeypatch.setattr("software_factory.runner.Commands", IncompatibleImage)
+    monkeypatch.setattr("software_factory.runner.shutil.which", lambda name: "/bin/" + name)
+    with pytest.raises(FactoryError, match="rebuild.*restart"):
+        preflight(Config("owner/repo", "chosen", IMAGE, tmp_path / "artifacts"))
+    assert len(names) == 1
+    remaining = subprocess.check_output(["docker", "ps", "-aq", "--filter", f"name=^{names[0]}$"], text=True)
+    assert not remaining.strip()
 
 
 def test_operator_starts_real_cli_with_shared_image_and_observes_idle_polling(tmp_path: Path) -> None:

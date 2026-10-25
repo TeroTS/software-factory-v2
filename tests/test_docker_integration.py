@@ -112,23 +112,6 @@ def test_real_build_compose_socket_same_path_setup_pi_service_verify_and_host_ac
     assert bearer not in (instance.directory / "run.log").read_text()
 
 
-@pytest.mark.parametrize("uid,gid", [(65534, 46123), (46123, 20), (0, 0)])
-def test_numeric_identity_handles_existing_and_new_accounts(sandbox, monkeypatch, uid, gid) -> None:
-    sandbox.stop()
-    with monkeypatch.context() as identity:
-        identity.setattr("software_factory.sandbox.os.getuid", lambda: uid)
-        identity.setattr("software_factory.sandbox.os.getgid", lambda: gid)
-        instance = Sandbox(sandbox.image_id, sandbox.env["DOCKER_HOST"], sandbox.directory, Commands())
-        try:
-            instance.start()
-            assert execute(instance, "id", "-u").strip() == str(uid)
-            assert execute(instance, "id", "-g").strip() == str(gid)
-            assert execute(instance, "sudo", "-n", "id", "-u").strip() == "0"
-            execute(instance, "docker", "info")
-        finally:
-            instance.stop()
-
-
 def test_root_user_configuration_does_not_import_workspace_python_modules(sandbox) -> None:
     sandbox.stop()
     (sandbox.workspace / "uuid.py").write_text("raise RuntimeError('untrusted workspace import')\n")

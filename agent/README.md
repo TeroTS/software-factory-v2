@@ -1,6 +1,7 @@
 # Shared agent image
 
-Build from this repository, on a local native ARM64 Linux-container engine:
+Build from a factory-owned checkout on the provisioned Ubuntu 24.04 ARM64 Lima
+guest's Linux disk, logged in as `factory` (UID/GID 2000:2000):
 
 ```sh
 docker build --platform linux/arm64 -t software-factory-agent:1.0.0 agent
@@ -42,8 +43,9 @@ configuration are copied into the image.
 | CA certificates / Linux utilities | Fixed Debian snapshot and base manifest |
 
 The build includes `build-essential`, standard utilities, curl, certificates,
-tar, unzip, and sudo. The runner starts the container with the host UID/GID;
-setup, Pi, and verification run as that user. Explicit `sudo -n` commands install
+tar, unzip, and sudo. The image selects account/group `factory`, UID/GID
+2000:2000; setup, Pi, and verification run as that fixed non-root identity.
+Explicit `sudo -n` commands install
 nonbaseline system tools without prompting. Elevation is not technically restricted
 to installs, and is not a security boundary. Do not run whole setup scripts or
 workspace builds as root or retry permission errors automatically with sudo.
@@ -58,29 +60,32 @@ Docker daemon, or target-specific dependencies in the image. Runtime engine acce
 grants effective engine/host control during issue execution; this image is not an isolation
 boundary.
 
-## Host-user execution and migration
+## Fixed-identity startup and migration
 
-Rebuild the image explicitly and restart the runner for this change. Startup
-rejects images without working noninteractive sudo; no new image tag policy or
-automatic migration is introduced. Setup scripts that assumed root need adaptation:
-use `sudo -n apt-get ...` for OS packages and ordinary user commands for project
-installs/builds. The image installs sudo from the same signed Debian snapshot and
-sets passwordless root elevation with root HOME selection.
+Rebuild the image explicitly and restart the runner after upgrading. Startup
+requires the provisioned Ubuntu 24.04 ARM64 host and effective UID/GID 2000:2000;
+it rejects root and other identities rather than switching accounts. Old images
+from the arbitrary-host-user model are incompatible. No new image tag policy or
+automatic account/configuration/artifact migration is introduced.
 
-The agent starts with the host numeric UID/GID. Fixed trusted isolated Python code
-initializes only disposable container account/shadow/group entries and
-`/tmp/factory-home`; it never traverses or repairs the workspace. This permits
-sudo with arbitrary numeric users, including existing account/group IDs. Target
-Docker exec uses UID-only selection to resolve the configured primary GID and
-actual engine-side socket supplementary group. The startup probe has no socket;
-per-run initialization resolves socket access on the real provider.
+The factory account/group, private `/tmp/factory-home`, writable XDG cache and npm
+user-local prefix are created at build time. The prefix's `bin` directory leads
+PATH. Startup validates the image's actual default execution identity, account,
+writable directories, tools, and noninteractive sudo without a root account-setup
+exec or account/shadow/group mutation. The socket-free startup probe does not
+prove issue-run Docker access.
 
-HOME is `/tmp/factory-home`; XDG caches and npm's user-local global prefix live
-under it. The prefix's `bin` directory is on the target PATH. No host home/settings
-are mounted. Deliberately root-owned or mode-restricted workspace output is not
-repaired: inaccessible required publication files block publication. Service-private
-data should use disposable owned volumes, not workspace binds. Host UID 0 still
-runs as root; no new root-runner restriction is imposed.
+Only factory has passwordless sudo configured by the image, with root HOME
+selection. Setup scripts that assumed root need adaptation: use explicit
+`sudo -n apt-get ...` for OS packages and ordinary user commands for project
+installs/builds.
+The image installs sudo from the same signed Debian snapshot.
+
+No host home/settings are mounted. Deliberately root-owned or mode-restricted
+workspace output is not repaired: inaccessible required publication files block
+publication. Service-private data should use disposable owned volumes, not
+workspace binds. Fixed identity and account-scoped sudo are not security isolation
+against an agent with Docker engine access.
 
 ## Verification boundary
 
@@ -94,11 +99,11 @@ real application builds, ordinary Compose services, same-path sibling mounts,
 socket access, a target-installed tool, host-usable ordinary files without repair,
 and scoped cleanup.
 Pi/authentication/GitHub boundaries are scripted; no live provider request or
-GitHub write is made. Desktop browser evidence is recorded in the current slice,
-not inferred from Linux CI.
+GitHub write is made. macOS browser access to guest services requires a separate
+check; it cannot be inferred from Linux CI.
 
 New agents use the image's unmodified Docker executable directly; no runtime
-Docker-executable installation or relocation is needed. The host-user/sudo
+Docker-executable installation or relocation is needed. The fixed-identity
 migration above does require an image rebuild. Startup validates
 the native engine/shared image. Factory-owned containers explicitly request
 `--platform linux/arm64` and `--pull=never`; target commands inherit
