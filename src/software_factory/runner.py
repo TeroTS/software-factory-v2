@@ -29,14 +29,18 @@ RUNTIME_CHECK = """set -eu
  test "$HOME" = /tmp/factory-home
  test "$(stat -c %u:%g "$HOME")" = 2000:2000
  test -w "$HOME"
+ test -x "$HOME"
  test "$XDG_CACHE_HOME" = "$HOME/.cache"
  test -d "$XDG_CACHE_HOME"
  test -w "$XDG_CACHE_HOME"
+ test -x "$XDG_CACHE_HOME"
  test "$NPM_CONFIG_PREFIX" = "$HOME/.local"
  test -d "$NPM_CONFIG_PREFIX"
  test -w "$NPM_CONFIG_PREFIX"
+ test -x "$NPM_CONFIG_PREFIX"
  test -d "$NPM_CONFIG_PREFIX/bin"
  test -w "$NPM_CONFIG_PREFIX/bin"
+ test -x "$NPM_CONFIG_PREFIX/bin"
  case "$PATH" in "$NPM_CONFIG_PREFIX/bin":*) ;; *) exit 1 ;; esac
  sudo -n sh -ec 'test "$(id -u)" = 0; test "$HOME" = /root'
  test "$(uname -m)" = aarch64

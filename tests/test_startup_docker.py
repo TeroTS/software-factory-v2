@@ -124,12 +124,12 @@ def test_startup_rejects_broken_required_tool_and_removes_probe(
                 return f"proxy-ep=proxy.business.githubcopilot.com;exp={int(time.time()) + 1800}"
             if phase == "agent runtime":
                 fixture = (
-                    "mkdir /tmp/broken-bin\n"
-                    f"printf '#!/bin/sh\\nexit 42\\n' > /tmp/broken-bin/{tool}\n"
-                    f"chmod 755 /tmp/broken-bin/{tool}\n"
-                    "export PATH=/tmp/broken-bin:$PATH\n"
+                    f"printf '#!/bin/sh\\necho broken-tool-invoked:{tool} >&2\\nexit 42\\n' "
+                    f'> "$NPM_CONFIG_PREFIX/bin/{tool}"\n'
+                    f'chmod 755 "$NPM_CONFIG_PREFIX/bin/{tool}"\n'
                 )
                 args = [*args[:-1], fixture + args[-1]]
+                self.log = tmp_path / "runtime.log"
             return super().run(args, phase, **kwargs)
 
     monkeypatch.setattr("software_factory.runner.Commands", ScriptedAuthentication)
@@ -143,11 +143,27 @@ def test_startup_rejects_broken_required_tool_and_removes_probe(
     containers = subprocess.check_output(["docker", "ps", "-aq", "--filter", f"name=^{name}$"], text=True)
     assert not containers.strip(), "failed startup probe left a container behind"
     assert list(config.artifacts_dir.iterdir()) == []
+    assert f"broken-tool-invoked:{tool}" in (tmp_path / "runtime.log").read_text()
 
 
 @pytest.mark.parametrize(
     "defect",
-    ["root", "wrong-uid", "wrong-gid", "home", "cache", "prefix", "bin", "account", "missing-cache", "missing-bin"],
+    [
+        "root",
+        "wrong-uid",
+        "wrong-gid",
+        "home",
+        "cache",
+        "prefix",
+        "bin",
+        "account",
+        "missing-cache",
+        "missing-bin",
+        "unsearchable-home",
+        "unsearchable-cache",
+        "unsearchable-prefix",
+        "unsearchable-bin",
+    ],
 )
 def test_startup_rejects_incompatible_identity_or_home_without_runtime_repair(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, defect: str
@@ -174,6 +190,10 @@ def test_startup_rejects_incompatible_identity_or_home_without_runtime_repair(
                     "account": "sed -i 's/^factory:/old-factory:/' /etc/passwd",
                     "missing-cache": "rmdir /tmp/factory-home/.cache",
                     "missing-bin": "rmdir /tmp/factory-home/.local/bin",
+                    "unsearchable-home": "chmod 0600 /tmp/factory-home",
+                    "unsearchable-cache": "chmod 0600 /tmp/factory-home/.cache",
+                    "unsearchable-prefix": "chmod 0600 /tmp/factory-home/.local",
+                    "unsearchable-bin": "chmod 0600 /tmp/factory-home/.local/bin",
                 }[defect]
                 super().run(
                     ["docker", "exec", "--user", "0:0", names[0], "sh", "-ec", mutation],
