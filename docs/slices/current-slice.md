@@ -2,191 +2,165 @@
 
 Status: done
 
-Current US-05 correction: host UID/GID execution with explicit `sudo -n` and no
-workspace permission repair supersedes the historical root/helper evidence below.
-See **Host-user correction evidence** for that verification. The operator-approved
-Python Pi-wrapper replacement retires the Node-only coverage harness/gates;
-current Python coverage includes the bridge.
-
 ## Slice Goal
-- Let the operator turn a labeled issue into a Docker-verified draft PR using the shared agent image and the target's ordinary application services.
+- Let the operator explicitly provision a Linux factory host ready for manual authentication and later runner startup.
 
 ## Slice Boundary
 - Actor: Operator.
-- Trigger: An issue receives `agent:implement` while the validated runner is polling.
-- Action: Submit the issue for unattended first-pass implementation and verification using the target's ordinary application services, then clean owned execution resources and publish through trusted host Git.
-- Visible outcome: The issue links to a draft PR containing nonempty verified changes after required cleanup succeeds.
-- Authoritative state transition: Unclaimed labeled issue → GitHub-recorded successful issue run linked to a draft PR.
-- Include duplicate handling, immutable task input, required validation, failure reporting, deadline enforcement, credential boundaries, resource ownership, and cleanup/publication gates. Do not include verification recovery or the explicit manual-requeue outcome.
+- Trigger: An explicitly authorized Ubuntu Server 24.04 LTS ARM64 host is available for factory setup.
+- Action: Prepare the local Lima host using the repository-maintained provisioning entrypoint/runbook.
+- Visible outcome: The fixed factory account and validated prerequisites are ready for manual authentication and runner startup.
+- Authoritative state transition: Unprepared Linux host → provisioned factory host with verified identity/tool access.
+- Include readiness validation and failure reporting, without issue processing or automatic authentication.
 
 ## Stories In Scope
-- `US-05 Turn a labeled issue into a Docker-verified draft PR`
+- `US-08 Provision a Linux factory host`
 
 ## Stories Completed In This Slice
-- `US-05 Turn a labeled issue into a Docker-verified draft PR`
+- `US-08 Provision a Linux factory host`
 
 ## Stories Remaining In This Slice
 - None.
 
 ## Contract Inputs
-- `docs/contracts.md`, Contract 1: preserve validated four-field configuration, immutable session image resolution, local-engine requirements, and terminal exit semantics.
-- `docs/contracts.md`, Contract 2: exact PR/branch checks, confirmed trigger removal before execution/notification, running status, immutable title/body snapshot, and fresh discovered-default-branch workspace.
-- `docs/contracts.md`, Contract 3: one host-UID/GID shared-image agent, writable container home/caches, explicit `sudo -n` system installs, same-path workspace/socket access, native ARM64, exact-model stdin-only Copilot invocation, and limited normal inputs without isolation claims.
-- `docs/contracts.md`, Contract 4 first-pass portions: executable setup/verify entrypoints, setup → implementation → verification, explicit completed-verification results, and one original 900-second deadline including cleanup/publication. Verification recovery belongs to US-06.
-- `docs/contracts.md`, Contract 5: completed cleanup, remaining time, nonempty diff, trusted host Git, create-only remote branch, draft PR identity, and inspection rather than retries after uncertain writes.
-- `docs/contracts.md`, Contract 6 current-run portions: concise running/skip/success/failure reporting, private diagnostics, preservation of previous artifacts, and no automatic trigger restoration or session recovery. The fresh manual-requeue demonstration belongs to US-07.
-- `docs/contracts.md`, Contract 7: unique run identity, exact ownership labels, host-owned cleanup records independent of mutable Compose files, bounded scoped cleanup, unrelated-resource preservation, and host-usable workspace files.
-- `docs/contracts.md`, Contract 8: real target builds/Compose/service-backed checks, native application/dependency execution, same-path sibling mounts, and explicit service addresses without transparent localhost forwarding.
+- `docs/contracts.md`, Contract 9: explicit provisioning, fixed account, sources/verification, Lima/native storage, repeatability, readiness, failure handling, and local-VM-only acceptance.
+- `docs/contracts.md`, Contract 1: authentication, image build, and runner startup remain subsequent operator actions; preserve CLI/TOML.
 - No factory-owned HTTP API or `openapi.yaml` applies.
 
 ## Decision Inputs
-- `docs/plans/non-root-agent-workspace.md`: operator-approved host-user correction and `sudo -n` dependency/mechanism; corresponding DECISIONS/SPEC/contracts updated before production changes.
+- `DECISIONS.md`, Operations / Deployment and Open Questions: operator-approved local-VM-only acceptance supersedes separate production-like host repetition; explicit agreement before installation/allocation, verified release/package inputs before installation commands, and no automatic trust/source/version fallback remain required.
 
 ## Shared State Required Now
-- Existing validated configuration and `AgentRuntime` session image ID/local engine endpoint; no backend selector or new operator configuration.
-- One fresh private run directory (0700), private command log (0600), workspace, and trusted host Git metadata outside the ordinary agent mount.
-- One immutable issue title/body snapshot plus resolved default branch/base commit; no comments, attachments, linked content, or later issue edits.
-- One unique `FACTORY_RUN_ID`, matching `COMPOSE_PROJECT_NAME`, agent container identity, and sufficient host-owned resource identity for scoped cleanup. Direct resources use `software-factory.run-id`; Compose ownership matches the exact project label.
-- One original monotonic 900-second deadline spanning workspace preparation through publication, with a separate bounded cleanup attempt after failure/expiry/interruption.
-- Explicit verification and cleanup outcomes gating publication; no recovery checkpoint, persisted job state, repair loop, or resumable session.
+- Host account/group `factory`, UID/GID `2000:2000`, Docker membership, no general host passwordless sudo.
+- Operator-approved persistent Lima 2.2.1 VM: 4 CPUs, 8 GiB RAM, 40 GiB disk, native Linux execution data, no macOS directory sharing, and Rancher stopped while Lima is in use.
+- SSH plus one explicit guest TCP 8080 → macOS 127.0.0.1:8080 forward; other automatic service forwards suppressed. Rosetta/containerd disabled.
+- Recorded source/package/release pins and verification evidence; existing correct account/tool installations and previous credentials/repositories/diagnostics preserved on repeated provisioning.
+- Operator-approved local public Zscaler CA, fingerprint `04F61F1D13AAE1D16573DC2C37F796FDF4AC97713A6959EBB11D2473958B1A53`. It was installed only in the authorized guest; generic provisioning does not copy/add trust roots.
+- No issue-run state, new TOML fields, credentials, or recovery state.
 
 ## Operations / Endpoints / Surfaces In This Slice
-- `src/software_factory/runner.py`: replace the temporary pre-claim guard with serial first-pass coordination, private run lifecycle, cleanup-before-publication, and safe outcome reporting. Preserve startup image/engine validation.
-- `src/software_factory/sandbox.py`: replace historical prepared-Compose validation/mount rewriting/lifecycle with the shared-image Docker execution and scoped cleanup boundary; reuse credential validation and explicit verification-result handling where applicable. Keep only one execution path.
-- `src/software_factory/sandbox_agent.py`: preserve exact-model, temporary-config, disabled-discovery, nonpersistent Pi invocation and stdin-only credentials; inspect run-context/instruction needs without adding recovery behavior.
-- `src/software_factory/github.py`, `repository.py`, and `process.py`: reuse existing exact duplicate detection, confirmed trigger removal, snapshotting, trusted create-only publication, shared deadlines, private logging, and redaction; change only where required by the new execution path.
-- `src/software_factory/__main__.py` and `config.py`: inspect interruption/error callers and preserve existing CLI/TOML interfaces.
-- `tests/test_runner.py`, `test_docker_integration.py`, `test_sandbox.py`, `tests_support.py`, and related startup/boundary/publication tests: port first-pass regressions and replace obsolete fixtures/assertions, retaining useful independent Git/process/credential/bridge coverage. Audit historical live harness callers without enabling them.
-- `README.md`, `AGENTS.md`, `CONTEXT.md`, startup-status portions of SPEC/contracts, `agent/README.md`, architecture/workflow docs, and ARM64 CI/verification configuration: update delivered-runtime guidance and test entrypoints without claiming US-06/US-07 acceptance or obsolete isolation guarantees.
+- `scripts/provision-host`: explicit Ubuntu system-Python bootstrap, separate from `scripts/setup`.
+- `src/software_factory/provision.py`: host/identity checks, authenticated pinned APT installation, verified official Python/Node/uv releases, user-scoped pinned Pi installation, factory login paths, native Docker readiness, and `--check` without installation/account changes.
+- Installation uses `/opt/software-factory` version directories, factory-local npm/Pi, and a factory-only `/etc/profile.d/software-factory.sh`; system Python is unchanged. Commands share a one-hour budget and private 0600 logs, with safe partial-failure diagnostics.
+- `infra/lima/factory.yaml` and README operator commands describe VM setup/provisioning. Exact resolved source versions, verification provenance, implementation notes, and delivery evidence are recorded only in this slice note.
+- Durable docs contain operator guidance, standing rules, and architecture boundaries—not story status, implementation history, or test results. Existing runner/image behavior is unchanged.
+- The operator explicitly removed deployment/testing outside this local VM from scope. No separate-host acceptance blocker remains, and US-09 has not been started.
+- Consolidated delivery tracking and source-verification records into this note. Removed story/status/history from durable guidance; preserved concurrent removal of `docs/workflows/` and `docs/plans/` and relocation of the user-owned simplified workflow without recreating or editing those files.
 
 ## Tests Required
-- Test-first first-pass orchestration: exact duplicate/branch skip handling, confirmed trigger removal, running status, immutable snapshot, fresh default-branch checkout, setup → Pi → verify → cleanup → commit/push/draft PR → actual-link reporting. A completed verification failure fails this slice's run without repair.
-- Explicit story E2E: an operator labels a fixture issue; run the real CLI/polling/orchestration path with scripted GitHub/authentication/Pi boundaries, real local Git and real ARM64 Docker build/ordinary Compose/services; observe a nonempty verified draft-PR request and success comment linking the scripted returned URL only after required cleanup. Assert the created branch content/identity using a local Git remote. No live GitHub or Copilot access.
-- Real Docker execution checks: socket access, same-path sibling binds, user-local tool installation, explicit root system installation, native target execution/networking, and host-owned ordinary output without permission repair. Inaccessible required publication files/directories must block publication and remain unchanged.
-- Desktop-provider evidence: prove same-path sharing, socket/file ownership, agent-to-service connectivity, and a macOS browser reaching a fixture application's published port on the actual local provider. Linux CI is not a substitute. Report feasibility contradictions rather than changing accepted guarantees.
-- Cleanup matrix: success, setup failure, first-pass verification failure, timeout, interruption, partial startup, and cleanup failure. Assert cleanup failure blocks publication, owned containers stop before networks/disposable volumes are removed, and cleanup does not execute mutable target teardown on the host.
-- Preserve an unrelated sentinel container/network/volume and earlier diagnostic artifacts; confirm exact ownership matching and no broad pruning, image/cache deletion, or deletion based only on disuse.
-- Negative boundaries: missing/nonexecutable entrypoints, failed setup before Pi, malformed/expired credentials, endpoint/model/provider failures, incompatible engine/shared agent image at startup, actual Docker/setup/verification failures, lifecycle/verification transport errors, deadline expiry across phases, empty diff, commit/push/PR/reporting failures, uncertain-write inspection without retry, and private/redacted retained diagnostics. Target platform overrides are not intercepted or guaranteed to be rejected.
-- Regression/removal audit: preserve US-04 startup failures and immutable session image semantics. Assert agent startup performs only the container start, leaving the image Docker executable unchanged and the native target default present. Remove obsolete backend callers/fixtures; deferred US-06/US-07 scenarios remain in git history rather than skipped obsolete-runtime tests.
-- Run `./scripts/verify` in format → lint → coverage order. Explicitly build the local shared image, then run `FACTORY_DOCKER_TESTS=1 FACTORY_AGENT_IMAGE_TESTS=1 FACTORY_E2E_APPROVED=0 FACTORY_COPILOT_TESTS=0 FACTORY_SMOKE_SANDBOX_TESTS=0 ./scripts/verify` on ARM64, extending the real Docker suite for US-05. Preserve the Python overall line/branch 80% gate, including the Pi bridge, and report skips/coverage changes.
+- Real Lima readiness E2E: `FACTORY_PROVISION_TESTS=1 uv run --frozen pytest tests/test_provision_lima.py -q` passed from the initial unprovisioned guest, then on repeated checks. It stages only trusted bootstrap code, installs/checks tools and actual factory Docker access, seeds private source/diagnostic sentinels, repeats provisioning, and confirms their content/ownership/mode survive. It removes only its own sentinels; bootstrap snapshots and private command logs remain.
+- `tests/test_provision.py`: **56** unit/boundary cases cover unsupported/rootless invocation, name/ID conflicts, correct reuse, managed-file preservation/symlinks, unavailable downloads/HTTPS downgrade/checksum failure, Node signature/manifest failures, safe archives, exact signed APT arguments and installation failure, factory-only Pi/environment, version/home/UID/GID failures, forbidden general shell sudo, unusable socket/engine, malformed responses, phase ordering, and safe partial-failure/deadline diagnostics. External command/install failures are scripted, not destructive experiments on existing accounts.
+- Test-first failures reproduced absent implementation, wrong wildcard forwarding defaults, missing uv system-CA selection, unsafe empty archive paths, missing socket/malformed engine diagnostics, and non-logging error reporting before the corresponding changes.
+- Local `factory` VM creation and stop/start passed using the checksum-verified Ubuntu 20260926 ARM64 image. Guest checks confirmed Ubuntu 24.04/aarch64, four CPUs, ~7.7 GiB usable RAM, native root storage, and no virtiofs/9p/SSHFS mounts. Post-install root free space is ~35 GiB. Rancher is stopped. SSH access passed.
+- Temporary HTTP fixtures proved macOS loopback 8080 reachability and non-forwarding of guest-reachable 18081; both were stopped. Initial host port 8081 unavailability was handled without changing an existing service. These are HTTP probes, not browser/Docker application-service evidence.
+- Initial guest HTTPS failed on all required source hosts. After explicit CA approval/installation, verified HTTPS passed. Signed APT metadata, exact package versions, official archive checksums, Node's detached signature, and Pi registry integrity were checked/recorded before installation implementation.
+- Factory login checks passed for 2000:2000, Python 3.14.3, Node 22.19.0, uv 0.5.13, Pi 1.3.0, and actual native local Docker. uv found the separate Python and resolved declared Ruff 0.17.2 over verified HTTPS with `--dry-run` (no installation). A probe initially retained the inaccessible administrator working directory; rerunning from factory HOME fixed the probe without permission changes. Provisioning commands already set the proper working directory.
+- Final `FACTORY_PROVISION_TESTS=1 ./scripts/verify` passed format → lint → tests/coverage: **308 passed, 35 opt-in Docker/image checks skipped**, Python overall line/branch **99.34%**, provisioning module **100%**. An initial coverage decrease was investigated: root installation paths in the guest subprocess were not measured by host coverage; meaningful in-process external-boundary tests closed those gaps. Final coverage exceeds the prior **99.04%** baseline; the **80%** gate and exclusions are unchanged.
+- `limactl validate infra/lima/factory.yaml`, shell syntax checking, CLI help without polling, and the prior documentation checks passed before consolidation. After this documentation-only cleanup, `git diff --check`, Markdown whitespace/fences, **52 local links/anchors**, canonical slice/source-evidence structure, and absence of story IDs in README/AGENTS/architecture passed. Behavior tests were not rerun because code was unchanged. No standalone type checker/Markdown linter is configured.
+- No separate production-like host evidence is required under the revised operator-approved scope. Existing Docker/image issue-run suites were not enabled: Rancher is stopped and no shared agent image has been built in Lima. Their later command is `FACTORY_DOCKER_TESTS=1 FACTORY_AGENT_IMAGE_TESTS=1 ./scripts/verify` after explicit compatible image preparation; US-09/US-10 migration checks remain separate.
+
+### Verified provisioning inputs
+
+These inputs were resolved on the authorized Ubuntu 24.04 ARM64 guest on
+2026-10-25 before installation commands were implemented. Verification records
+are consolidated here rather than duplicated in operator or architecture docs.
+
+The operator approved the public Zscaler root identified under Shared State.
+Only that matching public certificate was installed at
+`/usr/local/share/ca-certificates/factory-zscaler.crt`, followed by
+`update-ca-certificates`. Verified HTTPS then passed for all required source hosts;
+no private key was copied. This machine-specific trust step is not part of generic
+provisioning.
+
+APT authenticated Ubuntu metadata using the image's
+`/usr/share/keyrings/ubuntu-archive-keyring.gpg`. Research-only isolated source/list
+directories authenticated Docker and GitHub CLI InRelease/package indexes before
+installation. No package installation or upgrade occurred during that research.
+
+| Source | Suites/components | Signing identity |
+| --- | --- | --- |
+| `http://ports.ubuntu.com/ubuntu-ports` | noble, noble-updates, noble-security / main | Image-provided Ubuntu archive keyring. |
+| `https://download.docker.com/linux/ubuntu` | noble / stable | [Official key](https://download.docker.com/linux/ubuntu/gpg), primary fingerprint `9DC858229FC7DD38854AE2D88D81803C0EBFCD88`. |
+| `https://cli.github.com/packages` | stable / main | [Official keyring](https://cli.github.com/packages/githubcli-archive-keyring.gpg), current primary fingerprint `7F38BBB59D064DBCB3D84D725612B36462313325`; expired historical primary `2C6106201985B60E6C7AC87323F3D4EA75716059` was not the current signer. |
+
+Exact top-level package versions resolved from authenticated indexes:
+
+| Package | Version |
+| --- | --- |
+| git | `1:2.43.0-1ubuntu7.4` |
+| make | `4.3-4.1build2` |
+| sudo | `1.9.15p5-3ubuntu5.24.04.4` |
+| curl | `8.5.0-2ubuntu10.16` |
+| ca-certificates | `20260816ubuntu0.24.04.1` |
+| build-essential | `12.10ubuntu1` |
+| pkg-config | `1.8.1-2build1` |
+| libssl-dev | `3.0.13-0ubuntu3.16` |
+| zlib1g-dev | `1:1.3.dfsg-3.1ubuntu2.3` |
+| libbz2-dev | `1.0.8-5.1ubuntu0.1` |
+| libreadline-dev | `8.2-4build1` |
+| libsqlite3-dev | `3.45.1-1ubuntu2.8` |
+| libffi-dev | `3.4.6-1build1` |
+| liblzma-dev | `5.6.1+really5.4.5-1ubuntu0.4` |
+| libncurses-dev | `6.4+20240113-1ubuntu2.2` |
+| xz-utils | `5.6.1+really5.4.5-1ubuntu0.4` |
+| gnupg | `2.4.4-2ubuntu17.6` |
+| docker-ce | `5:29.9.2-1~ubuntu.24.04~noble` |
+| docker-ce-cli | `5:29.9.2-1~ubuntu.24.04~noble` |
+| containerd.io | `2.4.2-3~ubuntu.24.04~noble` |
+| docker-buildx-plugin | `0.38.1-1~ubuntu.24.04~noble` |
+| docker-compose-plugin | `5.6.1-1~ubuntu.24.04~noble` |
+| gh | `2.103.2` |
+
+Transitive OS dependencies were authenticated by APT, not fully snapshotted.
+Observed key-file SHA-256 values:
+
+- Docker ASCII key: `1500c1f56fa9e26b9b8f42452a553675796ade0807cdce11975eb98170b3a570`.
+- GitHub CLI binary keyring: `6084d5d7bd8e288441e0e94fc6275570895da18e6751f70f057485dc2d1a811b`.
+
+The guest downloaded the following archives and matched their SHA-256 values
+with HTTPS verification enabled:
+
+| Release | Official archive | SHA-256 and verification basis |
+| --- | --- | --- |
+| Python 3.14.3 | [python.org source](https://www.python.org/ftp/python/3.14.3/Python-3.14.3.tar.xz) | `a97d5549e9ad81fe17159ed02c68774ad5d266c72f8d9a0b5a9c371fe85d902b`, matching the digest in official adjacent `.sigstore` metadata. Checksum/HTTPS verification, not a Sigstore signature claim. |
+| Node.js 22.19.0 | [Official ARM64 archive](https://nodejs.org/dist/v22.19.0/node-v22.19.0-linux-arm64.tar.xz) | `0b2d9f564b6594222a62c82e1df2efe119dd4a4aff29644f4dd325bf360b6bcc`; `gpgv` verified detached `SHASUMS256.txt.sig` over `SHASUMS256.txt`, whose ARM64 entry matched. |
+| uv 0.5.13 | [Official ARM64 GNU archive](https://github.com/astral-sh/uv/releases/download/0.5.13/uv-aarch64-unknown-linux-gnu.tar.gz) | `d0054db9ba0ec472ee6d28fa3eda94fb021b5e77c962f3bb1ff4b4fa7934e66d`, matching the official adjacent `.sha256` asset. |
+
+Node signer Antoine du Hamel's fingerprint
+`5BE8A3F6C8A5C01D106C0AD820B1A390B168D356` was listed in the
+[versioned Node README](https://github.com/nodejs/node/blob/v22.19.0/README.md#release-keys).
+The key was downloaded from
+[keys.openpgp.org by full fingerprint](https://keys.openpgp.org/vks/v1/by-fingerprint/5BE8A3F6C8A5C01D106C0AD820B1A390B168D356),
+with key-file SHA-256 `3adca70e0239a43803df385987be8303ed9abb3c2fb203feeda31dc6a5256731`.
+The detached signature, not the earlier clear-signed-manifest experiment, was
+used for installation verification.
+
+The [npm registry release metadata](https://registry.npmjs.org/@earendil-works%2fpi-coding-agent/1.3.0)
+confirmed `@earendil-works/pi-coding-agent@1.3.0` and Node `>=22.19.0`.
+The downloaded tarball matched registry integrity
+`sha512-V/WoCjA2hQSe3QLWIUB24cTRdtEdeLiIzkDqU5RMXV6VWuD+KGZnzVBMhglwdnQTySkehZsjt8a3g6Jd2g4nnw==`;
+its SHA-256 was `ae2785e870b81a8c8e1d44510a57b5ee0bfc9e974679ac2faaada4aabee3d3c0`.
+Pi was installed under factory with npm integrity/TLS checks retained, without
+authentication.
 
 ## Not Now
-- US-06 repair-and-verify recovery, exactly-three-repair exhaustion, and recovery-to-publication acceptance. Preserve reusable feedback handling but do not add the recovery loop in this slice.
-- US-07 explicit fresh manual requeue and its interrupted-run/restart/relabel-to-PR E2E. Do not resume old artifacts, restore triggers automatically, or erase earlier diagnostics in this slice.
-- Live authenticated Copilot requests, real GitHub label/comment/branch/PR writes, or disabled historical live-harness execution; these require separate explicit approval.
-- New configuration, backend selection, target-specific factory images/Compose profiles, automatic shared-image builds/pulls by the runner, host target-tool installation, automatic migration, remote engines/emulation, transparent localhost forwarding, broad cleanup, or local tryout/image archives.
-- The untracked `docs/workflows/simplified_worflow.md` is unrelated user work and remains untouched.
+- US-09 fixed host/image startup validation, baked image account/home/sudo, and fixed-identity ARM64 CI execution.
+- US-10 actual agent exec supplementary socket membership, runtime account initialization removal, issue-to-PR regression, and full service/browser evidence.
+- US-06 verification repairs and US-07 full manual-requeue acceptance are outside the migration backlog.
+- Automatic authentication, live Copilot/GitHub checks, runner-managed provisioning, paid resources, general host passwordless sudo, account/artifact migration, permission repair, image build, or runner startup.
+- Cloud access/allocation remains unauthorized. No live authentication, commit, or push was performed.
 
 ## Done When
-- The operator's labeled fixture issue reaches a draft-PR link through the real first-pass Docker-enabled execution/publication path with scripted external boundaries, real Docker services, and nonempty verified changes.
-- Required validation/duplicate handling and all failure paths fail visibly without unsafe publication, uncertain-write retries, secret disclosure, or automatic requeue; failed diagnostics remain private and retained.
-- Native execution, same-path sharing, target installation, socket access, explicit networking, desktop browser access, and host file usability have real local evidence.
-- Known run-owned mutating processes/services stop and required scoped cleanup completes before host publication; unrelated resources and earlier diagnostics remain intact. Expiry/interruption still attempts bounded cleanup.
-- One execution path remains, obsolete prepared-Compose helpers/callers/fixtures are removed or replaced, and current operator/architecture/workflow guidance accurately describes US-05 without claiming repair/requeue acceptance.
-- Focused story E2E, failure/boundary tests, real ARM64 Docker checks, format/lint, and the unchanged Python coverage gate pass; verification gaps are reported rather than marked complete.
+- The authorized local Lima Ubuntu ARM64 host reaches independently checked readiness through the explicit provisioning entrypoint; no separate production-like deployment/testing is required.
+- Repeated provisioning preserves correct state/credentials/repositories/diagnostics; conflicts, failed verification/installations, and unusable Docker access report failure rather than readiness.
+- Tools use the accepted sources/pins and recorded verification evidence, without replacing system Python, silently substituting versions, or automatically upgrading.
+- Manual authentication and later image build/startup remain separate; instructions accurately distinguish delivery from outstanding migration work.
+- Required real readiness checks, failure regressions, formatting, lint, documentation checks, and the unchanged coverage gate pass.
 
-## Historical Completion Summary
-
-The root agent and ownership-helper behavior in this historical delivery record
-is superseded by the host-user correction below; prior commands/counts are not
-current verification.
-- A labeled issue now takes the real serial first-pass execution path: exact PR/branch checks, confirmed trigger removal, running status, immutable snapshot/default-branch checkout, setup → exact-model Pi → canonical verification, required cleanup, trusted create-only host publication, and actual draft-PR link reporting. Already-labeled issues are eligible; the temporary guard is removed. A completed verification failure is terminal until US-06.
-- Each run uses the immutable startup image ID, one root agent, a same-absolute-path workspace mount, and the resolved local engine. On macOS the engine-side socket is `/var/run/docker.sock`, not the host provider proxy. Normal inputs exclude host Git metadata/publication credentials and broader Pi configuration. Copilot bearer remains stdin-only with endpoint/lifetime validation, temporary config, disabled discovered resources, and nonpersistent exact-model invocation.
-- Unique run identity and matching Compose/direct labels scope host-controlled cleanup independently of mutable target teardown files. The agent stops first, then owned containers, networks, and disposable volumes; a fixed network-free mount-only helper restores host file ownership/access. Cleanup failures block publication. Cleanup does not depend on writable diagnostic storage, and the safe run identity/location is reported locally. The original 900-second deadline is never reset; cleanup and status-only failure/uncertainty inspection have separate bounded budgets, not extra implementation/publication time.
-- US-05 cleanup supersedes the previous run-local Docker interception: the installation code, wrapper module, 28 dedicated test cases, four Docker rejection cases, and synthetic architecture fixture are removed without a replacement guard. Startup still validates a native ARM64 engine/shared image and retains the immutable image ID. Factory-owned containers explicitly request `--platform linux/arm64` and `--pull=never`; target commands inherit `DOCKER_DEFAULT_PLATFORM=linux/arm64` and use the original image Docker executable. Target scripts must use native-compatible images/tools; explicit overrides are not intercepted and may invoke engine-supported emulation. The factory never selects an emulation fallback or substitutes dependencies; actual Docker/setup/verification failures remain visible. SPEC, contracts, decisions, and current guidance now distinguish native requests from enforcement.
-- Failure tests cover duplicate/claim/read failures, missing scripts, setup/provider/verification/lifecycle failures, malformed/oversized credential expiry, deadline expiry, interruption, partial startup, cleanup errors, empty-output/publication boundaries, uncertain-write inspection without retries, status errors, and private retained diagnostics. Unexpected execution errors also attempt cleanup before propagating. A real cleanup failure preserves an unowned network user rather than deleting it; unrelated sentinel container/network/volume and previous diagnostics remain intact.
-- Removed obsolete prepared-Compose validation, mount rewriting, lifecycle/configuration helpers, fixtures, skipped old runner/requeue/recovery scenarios, and historical live harnesses plus their observation-only tests. Unchanged GitHub/Git/process/credential/verification/bridge boundaries remain tested; old recovery/requeue scenarios are available in git history for their own stories. No compatibility backend, dependency upgrade, or operator-interface change was added. README, AGENTS, vocabulary status, SPEC/contracts delivery status, image guide, architecture/workflow guidance, and pytest marker configuration are current. Existing ARM64 CI automatically runs the replacement Docker suite.
-- Historical first-pass test-first evidence: 26 runner cases failed against the temporary pre-claim guard; three shared-image/cleanup cases failed against the historical lifecycle. Additional regressions reproduced diagnostic-write publication uncertainty, oversized expiry exceptions, and unexpected-error cleanup before their fixes. A CLI E2E synchronization race was reproduced and fixed by waiting for optional successful artifact removal before the test itself sends SIGTERM. Earlier Docker-wrapper tests/evidence are superseded by the removal described above.
-- Explicit local image rebuild passed: `docker build --platform linux/arm64 -t software-factory-agent:1.0.0 agent`. The unchanged baseline resolved to `sha256:95a3f55792632eb83f86d4bd8ba797bb034e1eeef14106819959aa2a0c7ef408`, linux/arm64. Real execution checks passed on the local Apple Silicon Rancher Desktop engine (linux/aarch64): Docker socket access, same-path sibling binds, target-installed npm tool, ordinary target image build/Compose services, service-backed verification, root-created file restoration, success/failure/expiry/partial-start cleanup, and unrelated-resource preservation.
-- `tests/test_issue_docker.py` runs real CLI/TOML/preflight/polling, real local Git checkout/create-only push, shared-image setup/Pi bridge/verification/cleanup, and scripted draft-PR/status responses. The success case validates committed content, exact draft payload, actual returned URL, and cleanup before publication. A SIGTERM-during-setup case cleans real running services, creates no PR, preserves private diagnostics and earlier artifacts, and exits 130. Host authentication, Pi, and GitHub are scripted; neither test calls live authenticated services.
-- Actual macOS browser evidence passed using `agent-browser --session us05-local open http://127.0.0.1:32775/` and `get text body`: the published fixture application displayed `implemented`. Screenshot: ignored `artifacts/us05-browser-check/browser.png`; the ignored probe result records subsequent scoped cleanup and host file access. This is local provider/browser evidence, not inferred from Linux CI.
-- Fresh wrapper-removal test-first evidence: the no-rewrite unit assertion failed because startup made two commands rather than one, and the real-container regression failed because Docker had been relocated. After removal, `UV_NATIVE_TLS=true FACTORY_DOCKER_TESTS=1 FACTORY_AGENT_IMAGE_TESTS=1 uv run --frozen pytest tests/test_sandbox.py tests/test_startup.py tests/test_startup_docker.py tests/test_docker_integration.py tests/test_issue_docker.py -q` passed **87 tests** against the existing image, without a rebuild. The real regression confirms `/usr/local/bin/docker` is the native ELF executable, the relocated path is absent, and the native default is present before ordinary build/Compose/service verification.
-- Wrapper-removal verification (historical): `UV_NATIVE_TLS=true FACTORY_DOCKER_TESTS=1 FACTORY_AGENT_IMAGE_TESTS=1 ./scripts/verify` passed. Ruff format/lint clean; **235 Python tests passed, zero skipped**; Python overall line/branch coverage **98.77%**; Node bridge line/branch/function coverage **100%**. This supersedes the earlier 267-test/98.22% record: the 32 removed cases tested only the deleted wrapper, and coverage increased with that source removed. All 80% gates and exclusions remain unchanged. `UV_NATIVE_TLS=true` uses the system trust store for the previously observed uv certificate issue; certificate verification is not disabled and dependencies are unchanged. No emulated workload, daemon/binfmt change, or replacement interception was introduced.
-- Packaging build, wheel resource checks, CLI help without polling, `git diff --check`, and local documentation link/format checks passed. No standalone type checker/Markdown linter is configured. No live Copilot/GitHub-writing check, remote CI run, commit, or push of this repository was performed. The unrelated untracked workflow document remains untouched. Docker access still grants effective engine/host control; unknown resources/hard-crash leftovers require operator inspection.
-
-## Historical Review Follow-up
-- Fixed ownership restoration after network/volume discovery or removal errors: once the agent and known owned containers are confirmed stopped, the trusted helper still attempts file-access restoration under the same bounded cleanup budget. Container removal/discovery uncertainty still skips restoration; every cleanup error still blocks publication and retains diagnostics.
-- Test-first evidence: four unit cases and the real Docker network-in-use case failed before the fix. The real case now confirms a mode-000 diagnostic becomes host-readable/writable with the operator's UID/GID while the unrelated network user is preserved and cleanup still reports failure. Unit cases cover agent/container cleanup uncertainty and network/volume discovery/removal failures.
-- Added existing-but-nonexecutable setup/verify cases alongside missing entrypoints; all four cases fail before setup executes. Extracted the shared private Copilot bearer command, preserving caller budgets, trusted working directories, flags, endpoint validation, and secret handling. Startup and issue-run regressions cover both callers.
-- Historical follow-up verification: `UV_NATIVE_TLS=true FACTORY_DOCKER_TESTS=1 FACTORY_AGENT_IMAGE_TESTS=1 ./scripts/verify` passed with **241 Python tests**, Python overall line/branch coverage **98.79%**, and Node bridge coverage **100%**. Superseded by the host-user correction evidence below.
-- Focused verification passed: `UV_NATIVE_TLS=true FACTORY_DOCKER_TESTS=1 uv run --frozen pytest tests/test_sandbox.py tests/test_docker_integration.py tests/test_runner.py -q` (**73 passed**), plus the startup/issue-run authentication assertions (**2 passed**) before extraction. Full verification then covered the extracted helper and real CLI E2E. No live authenticated service request or shared-image rebuild was needed.
-
-## Host-user correction evidence
-
-- Implemented the simplified plan in `docs/plans/non-root-agent-workspace.md`:
-  container starts with host UID/GID; ordinary setup/Pi/verify use that identity;
-  writable HOME/XDG caches/npm prefix remain container-local. Explicit `sudo -n`
-  uses the approved sudo package from the existing signed Debian snapshot.
-- Fixed isolated root Python initializes only container passwd/shadow/group entries
-  and the new empty home, including actual daemon-side socket group membership.
-  It never traverses the workspace. A real regression proved workspace `uuid.py`
-  was imported without Python isolation; `python -I` fixes that. UID-only exec
-  resolves primary/supplementary groups; an explicit UID:GID exec loses the socket
-  membership. Existing/new UID/GID cases and UID 0 are tested without new restrictions.
-- Removed `restore_ownership()` and its helper/budget entirely. Scoped cleanup
-  preserves workspace modes/ownership and Git executable-bit diff. A network-in-use
-  failure now preserves mode-000 output rather than repairing it. Host publication
-  fails on inaccessible required files/directories; ignored caches need not be
-  writable. Private host-owned logs remain available; failed workspaces are not
-  silently normalized. Cleanup failure retains the original safe execution error.
-- Test-first evidence: **12 focused failures** reproduced root execution/helper
-  behavior and silent omission of inaccessible directories; further regressions
-  reproduced missing sudo, absent shadow-account validation, unsafe workspace
-  Python imports, and loss of original failure context. These now pass. Real CLI
-  cases cover success, SIGTERM, root-created inaccessible output, and inaccessible
-  required directories, with no remote branch/PR after access failure.
-- Image build passed: `docker build --platform linux/arm64 -t software-factory-agent:1.0.0 agent`.
-  An initial cache-invalidating build failed on local PyPI certificate validation;
-  keeping the unchanged baseline layer and installing sudo in a separate pinned-
-  snapshot layer reused that baseline and built successfully. No trust bypass,
-  dependency upgrade, automatic runner build, or image-version policy was added.
-  Resolved image: `sha256:474b5cd83a6484ffa3f60e5ced67f062263ef4d9fe1dcff3b8a70ee0af76e4aa`,
-  native linux/arm64.
-- Actual Apple Silicon Rancher Desktop evidence: direct engine/socket access,
-  same-path sibling mounts, ordinary builds/Compose/service-backed checks,
-  user-local npm tooling, writable home/caches, explicit root system installation,
-  unchanged cleanup metadata, host-usable ordinary success/failure output, scoped
-  failure/timeout/interruption cleanup, and sentinel preservation all pass.
-- Host-user correction verification (before the Python Pi-wrapper replacement):
-  `UV_NATIVE_TLS=true FACTORY_DOCKER_TESTS=1 FACTORY_AGENT_IMAGE_TESTS=1 ./scripts/verify`
-  passed format → lint → coverage: **258 Python tests passed, zero skipped**;
-  Python overall line/branch coverage **98.93%** (up from 98.79%); Node bridge
-  line/branch/function coverage **100%**. All 80% gates/exclusions are unchanged.
-- `UV_NATIVE_TLS=true uv build --offline` built the sdist/wheel; wheel checks confirm
-  the bridge/configuration code is present and the ownership helper is absent.
-  CLI help without polling, `git diff --check`, Markdown whitespace/fence checks,
-  and **67 local links/anchors** across the changed docs passed.
-- Native Linux CI was not run locally; the existing ARM64 workflow builds the image
-  and runs these same Docker suites. No new browser check or live authenticated
-  Copilot/GitHub request was performed; earlier browser evidence remains historical.
-  No commit/push or changes to the unrelated workflow document were made.
-
-## Python Pi-wrapper replacement evidence
-
-- Replaced `sandbox_agent.mjs` with standalone standard-library `sandbox_agent.py`,
-  executed through `/usr/local/bin/python -I -c` inside the existing agent.
-  Exact provider/model matching, prompts/flags, stdin-only bearer delivery,
-  temporary private credentials, output forwarding, and exit handling are retained.
-  No dependency or image change was required; Node remains available for Pi.
-- Test-first: the wrapper and sandbox invocation tests failed before the Python
-  script existed. The replacement passes **50 focused tests**, including real Pi
-  fixture subprocesses in both isolated-script and in-process coverage modes.
-  Cases cover success/repair, exact model/provider mismatch, empty/failed/terminated
-  catalog, execution failure/termination, missing executable, private file modes,
-  and cleanup after invocation failures.
-- Removed the JavaScript wrapper and Node-only coverage harness, Make command,
-  and host CI Node setup under the approved policy update. Python's overall
-  line/branch **80%** gate and business-logic coverage scope remain unchanged;
-  the Python bridge is measured rather than excluded.
-- `make format-check && make lint && make coverage` passed: **250 passed,
-  35 opt-in Docker checks skipped**, overall coverage **99.04%**, bridge **100%**.
-- `UV_NATIVE_TLS=true FACTORY_DOCKER_TESTS=1 FACTORY_AGENT_IMAGE_TESTS=1 ./scripts/verify`
-  passed on the existing local native ARM64 engine/image: **285 passed, zero skipped**,
-  format/lint clean, overall coverage **99.04%**, bridge **100%**. Overall coverage
-  is up from the recorded host-user correction's **98.93%**; thresholds were not lowered.
-  Docker/CLI checks use scripted Pi/GitHub boundaries, not live authenticated services.
-- No new image build, browser check, live Copilot/GitHub request, remote CI run,
-  commit, or push was performed. The unrelated workflow document remains untouched.
+## Completion Summary
+- The operator can explicitly prepare/check the local Lima host with fixed identity `factory` 2000:2000, verified pinned tools, writable home, and actual native local Docker access, ready for manual authentication.
+- Repeated provisioning preserves correct installations and retained source/diagnostic files; invalid inputs, unverifiable releases, installation failures, and unusable access fail visibly without account/permission repair or false readiness.
+- Completed under the operator-approved local-VM-only scope. No cloud validation, authentication, image/startup/execution migration, commit, or push is claimed.
 
 ## Next Slice Recommendation
-- `US-06 Recover a Docker-enabled verification failure`: add bounded repair-and-verify recovery in the same agent environment/workspace under the original deadline, preserving all US-05 cleanup/publication gates. Keep `US-07 Manually requeue Docker-enabled work` in view for fresh-run identity/input/diagnostic invariants, without including its full outcome in the recovery slice.
+- `US-09 Start the runner with the fixed factory identity`: validate the provisioned host and baked image identity through startup-to-polling with scripted authentication/GitHub boundaries. Keep `US-10 Execute issue runs without runtime account initialization` in view for actual exec socket groups and obsolete initialization removal, without including that outcome in US-09. Both use local Lima acceptance; do not reintroduce separate production-like host testing.

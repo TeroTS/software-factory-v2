@@ -5,19 +5,22 @@
 - Read [README.md](README.md) for setup and operator guidance.
 - Read [SPEC.md](SPEC.md) and [docs/contracts.md](docs/contracts.md) for affected
   behavior/interfaces, and [CONTEXT.md](CONTEXT.md) before naming domain concepts.
-- For execution-model changes, read [DECISIONS.md](DECISIONS.md). US-04 replaces
-  startup with shared-image configuration; US-05 replaces the temporary guard with
-  first-pass Docker execution/publication. US-06 repairs and US-07 requeue acceptance
-  remain deferred. Do not restore the old Compose backend. Docker engine access
-  grants effective engine/host control, not sandbox isolation.
+- For execution-model changes, read [DECISIONS.md](DECISIONS.md) and
+  [docs/slices/current-slice.md](docs/slices/current-slice.md). Keep one execution
+  backend. Docker engine access grants effective engine/host control, not isolation.
+- Keep story scope/status, implementation notes, verification evidence, and next
+  steps only in `docs/slices/current-slice.md`. README is operator/developer guidance;
+  AGENTS contains standing agent rules; architecture docs describe boundaries;
+  workflow docs contain procedures. Update those only when their durable content
+  changes, not to mirror slice progress.
 - Inspect affected callers, tests, configuration, and working-tree changes. Keep
   changes minimal and preserve unrelated work. Follow the Domain Vocabulary,
   Safety and Contract Invariants, and Commenting Convention sections below.
 
 ## Architecture and paths
 
-Local autonomous coding factory: the Python standard-library runner currently
-validates shared-image startup, polls GitHub, and executes first-pass issue runs.
+Local autonomous coding factory: the Python standard-library runner validates
+shared-image startup, polls GitHub, and executes issue runs.
 GitHub holds durable coordination; no database, HTTP API, or hosted deployment exists.
 
 - `src/software_factory/__main__.py`, `config.py`: terminal CLI, signals, four-field TOML.
@@ -29,7 +32,9 @@ GitHub holds durable coordination; no database, HTTP API, or hosted deployment e
 - `tests/`: pytest unit, real local Git/process/Docker, scripted external-boundary CLI E2E;
   `tests/test_agent_wrapper.py` exercises the standalone Python bridge and measures its coverage.
 - `scripts/`, `Makefile`, `.github/workflows/verify.yml`: development entrypoints and CI.
-- `docs/architecture/service-architecture.md`: component diagram and boundary evidence.
+- `scripts/provision-host`, `infra/lima/`: explicit Ubuntu host preparation;
+  privileged provisioning checks require operator authorization.
+- `docs/architecture/service-architecture.md`: component boundaries and trust model.
 
 ## Development workflow
 
@@ -66,16 +71,14 @@ Add meaningful tests for behavior changes, including relevant failure cases.
 Keep real Git/process and Docker boundary checks where applicable. Pure logic
 uses pytest and existing fixtures/patterns. Distinguish scripted external boundaries
 from tests against real services. Do not run live checks implicitly:
-Copilot probes consume authenticated service access. Obsolete prepared-Compose
-fixtures and live harnesses are removed; scenarios remain in git history for
-US-06/US-07. New live checks require explicit approval. See [README live checks](README.md#verification-beyond-unit-tests).
+Copilot probes consume authenticated service access. Live checks require explicit
+approval. See [README live checks](README.md#verification-beyond-unit-tests).
 
 ## Configuration and local requirements
 
 - Runtime invocation: `uv run --frozen python -m software_factory --config /absolute/path/to/factory.toml`.
-  US-05 enables first-pass execution, including already-labeled issues; inspect
-  trigger labels before starting/upgrading. Verification failures currently fail
-  the run without repair; US-06/US-07 acceptance remains deferred.
+  Inspect trigger labels before starting/upgrading: already-labeled issues are
+  eligible for execution. Verification failures end the run without automatic repair.
 - Operator TOML requires exactly `repository`, `model`, `agent_image`, and
   `artifacts_dir`; no credentials/defaults. Relative artifact paths resolve against
   the TOML; model IDs exactly match an accessible `github-copilot` model. Reject
@@ -144,8 +147,9 @@ US-06/US-07. New live checks require explicit approval. See [README live checks]
   never recovery state. Manual requeue must not erase them.
 - Use existing `FactoryError`, `Commands`, and boundary classes/patterns. Maintain
   explicit return annotations and safe, actionable diagnostics without credential leaks.
-- Update accepted specs/contracts before interface or policy changes; keep README,
-  and architecture/workflow docs consistent.
+- Update accepted specs/contracts before interface or policy changes. Keep durable
+  operator/architecture guidance accurate without copying implementation status
+  or story tracking out of the current slice.
 
 ## Commenting Convention
 

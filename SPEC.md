@@ -4,16 +4,16 @@ Source: [DECISIONS.md](DECISIONS.md)
 
 ## Summary
 - Migrate the autonomous coding factory from arbitrary-host-user initialization to one fixed-identity Linux deployment. Use Ubuntu Server 24.04 LTS ARM64 and account/group `factory`, UID/GID `2000:2000`, on both the host and shared agent image.
-- Development uses a persistent Lima VM on Apple Silicon; production uses uniformly provisioned ARM64 EC2/equivalent hosts. The runner and Docker engine execute inside Linux, with execution data on its native filesystem.
-- This backlog covers only the migration, not previously delivered features or unrelated future work. It is unimplemented target behavior; existing contracts must be reconciled before production changes. Domain names follow [CONTEXT.md](CONTEXT.md).
+- The persistent Lima VM on Apple Silicon is the only deployment/acceptance environment. The runner and Docker engine execute inside Linux, with execution data on its native filesystem; no separate production-like host is required.
+- This backlog covers only the migration, not previously delivered features or unrelated future work. Only [the current slice](docs/slices/current-slice.md) records implementation state and verification evidence. Reconcile affected contracts before production changes. Domain names follow [CONTEXT.md](CONTEXT.md).
 - Docker access grants effective engine/host control. Fixed identity and limited ordinary mounts are not security isolation. Preserve existing first-pass behavior, credential handling, cleanup/publication safeguards, and human review requirements from DECISIONS.md.
 
 ## Goals
-- Provision local and production-like hosts through one explicit entrypoint/runbook and repository-maintained Lima configuration.
+- Provision the local Linux host through one explicit entrypoint/runbook and repository-maintained Lima configuration.
 - Bake the fixed account, writable home/caches, and account-scoped sudo configuration into the existing shared image; remove runtime account/shadow/group initialization.
 - Validate the fixed host/image identity and prove Docker socket supplementary-group access through actual issue execution.
 - Preserve existing CLI/TOML, serial coordination, original deadline, private diagnostics, scoped cleanup, and trusted create-only publication without permission repair.
-- Verify the migration in the Linux VM and an authorized production-like host, with ARM64 CI under the fixed identity and the unchanged Python overall line/branch 80% coverage gate.
+- Verify the migration in the local Linux VM, with ARM64 CI under the fixed identity and the unchanged Python overall line/branch 80% coverage gate.
 
 ## Non-Goals
 - Reimplementing existing issue coordination/publication, adding verification repairs, or delivering the full manual-requeue acceptance scenario.
@@ -36,7 +36,7 @@ Visible outcome: The host has the fixed factory account and validated factory pr
 
 Authoritative state transition: Unprepared Linux host → provisioned factory host with verified identity/tool access.
 
-Slice boundary: One provisioning-to-readiness outcome on a local Lima VM, using the same host provisioning entrypoint on an authorized production-like host. No issue processing or automatic authentication is required to demonstrate readiness.
+Slice boundary: One provisioning-to-readiness outcome on the local Lima VM through the explicit host provisioning entrypoint. No separate production-like host, issue processing, or automatic authentication is required to demonstrate readiness.
 
 Acceptance criteria:
 - Supply repository-maintained configuration/run instructions for a persistent Ubuntu Server 24.04 LTS ARM64 Lima VM with SSH and explicit host-to-guest service access. Keep execution data on its Linux disk and disable unnecessary macOS directory sharing. Installation/allocation is explicit, not a runner startup side effect.
@@ -44,7 +44,7 @@ Acceptance criteria:
 - Use Ubuntu's signed APT repositories for Git, Make, sudo, curl, certificates, and build dependencies; Docker's official signed Ubuntu APT repository for Engine/CLI/Compose/buildx; GitHub CLI's official signed APT repository for gh. Verify availability and record exact APT versions before implementing installation commands.
 - Install Python 3.14.3 from the checksum-verified official python.org source separately from system Python; official Node.js 22.19.0 ARM64 binaries with checksum/signature verification; official uv 0.5.13 binaries with checksum verification; and npm `@earendil-works/pi-coding-agent@1.3.0` under the factory account. Validate trust sources; do not use unversioned `curl | sh`, replace system Python, silently substitute unverifiable versions/sources, or introduce automatic upgrades.
 - Validate tools, fixed identity, native engine, and factory-account Docker access. Repeated provisioning validates/reuses correct state without erasing credentials, repositories, or diagnostics. Partial failures are reported, not claimed as readiness. Leave gh/Pi authentication manual and private; never acquire/copy credentials automatically.
-- A focused provisioning check observes readiness without live service access. Cover repeated provisioning, conflicting IDs, unavailable/unverifiable releases, installation failures, and unusable Docker access. Repeat on an authorized disposable EC2/equivalent host; VM results alone do not prove cloud storage/networking.
+- A focused provisioning check observes readiness without live service access. Cover repeated provisioning, conflicting IDs, unavailable/unverifiable releases, installation failures, and unusable Docker access. The local Lima VM is the acceptance environment; no separate EC2/equivalent repetition or cloud validation is required.
 
 Deferred follow-ups:
 - US-09: Start the runner with the fixed image identity.
@@ -92,13 +92,13 @@ Acceptance criteria:
 - Preserve setup → Pi → canonical verification, explicit `sudo -n` only for system installs, native target defaults/unmodified Docker CLI, explicit service addressing, and existing stdin-only ephemeral Copilot credential handling. Do not elevate whole phases, repair setup, or add verification repairs.
 - Keep service-private data in disposable run-owned volumes. Workspace-writing services need compatible ownership/permissions, not a blanket UID requirement for every image. Inaccessible required publication files block publication and remain unchanged; no recursive chown/chmod or requirement to make ignored caches writable.
 - Retain the original 900-second deadline, exact duplicate/claim checks, immutable task snapshot, trusted create-only Git/PR publication, private redacted diagnostics, and no automatic retry/requeue/recovery. Stop workspace mutators and complete scoped cleanup before publication; preserve unrelated resources/images/cache and previous artifacts. Cleanup/access failure blocks publication.
-- A focused real CLI E2E observes the existing verified draft-PR result through the new identity/group path. Exercise sibling mounts, target-installed tools, explicit sudo, service volumes/ownership, and a macOS browser reaching a fixture port through the VM's explicit network path. Repeat real boundaries on an authorized production-like host.
+- A focused real CLI E2E observes the existing verified draft-PR result through the new identity/group path. Exercise sibling mounts, target-installed tools, explicit sudo, service volumes/ownership, and a macOS browser reaching a fixture port through the VM's explicit network path. Run these real boundaries in the local Lima VM; no separate production-like host repetition is required.
 - Preserve failure regressions for setup, verification, provider/credentials, deadline, SIGTERM, partial startup, cleanup/access, and uncertain publication, including unrelated sentinel resources. Keep current instructions accurate and all Python business logic within the unchanged 80% coverage gate; distinguish scripted service boundaries from live authenticated evidence.
 
 Deferred follow-ups:
 - None within this migration.
 
 ## Open Questions
-- No unresolved choice among OS/architecture, fixed identity, VM tool, or installation sources. Exact Lima release/Ubuntu image pin, VM resources/network exposure, APT versions, and verification metadata remain provisioning work requiring the stated operator agreement; this specification does not choose them.
+- No unresolved choice among OS/architecture, fixed identity, VM tool, or installation sources. Local allocation/image pins belong in the repository-maintained Lima configuration; provisioning source-verification evidence belongs in the [current slice](docs/slices/current-slice.md). Acceptance is local-VM-only, without a cloud validation claim.
 - Docker supplementary-group behavior through the actual exec path remains unproven. If verification contradicts `--group-add`, return to the operator rather than silently choosing a fallback.
-- Cloud sizing/access and authorization remain deployment work. No paid instance, new network exposure, or live Copilot/GitHub-writing check is authorized by this specification.
+- Cloud deployment/testing is outside this migration's scope, not a pending acceptance prerequisite. No paid instance, new network exposure, or live Copilot/GitHub-writing check is authorized by this specification.

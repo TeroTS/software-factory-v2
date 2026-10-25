@@ -5,12 +5,9 @@ draft PRs using one factory-maintained Linux agent image and Pi/Copilot. GitHub
 holds durable coordination; there is no database, HTTP server, or hosted deployment.
 Human review and independent target CI remain required; the factory never merges.
 
-**Current delivery: US-04 startup and US-05 first-pass execution.** The temporary
-pre-claim guard is removed: already-labeled issues are eligible when the runner
-starts. Inspect labels before upgrading. A completed verification failure currently
-fails the run; bounded verification repairs (US-06) and the full manual-requeue
-acceptance scenario (US-07) remain deferred. Historical US-01–US-03 acceptance
-belongs to the previous runtime, not this execution model.
+Already-labeled issues are eligible when the runner starts. Inspect trigger labels
+before starting or upgrading. A completed verification failure ends the run;
+there is no automatic repair or requeue.
 
 Root plus Docker engine access grants effective engine control and potentially
 host control. The agent environment is **not a security boundary** protecting
@@ -82,11 +79,27 @@ they also interrupt setup using SIGTERM. Pi/authentication/GitHub are scripted,
 not live service acceptance. Tests remove only their own fixtures; factory cleanup
 leaves application images/build cache intact.
 
-Obsolete prepared-Compose helpers, fixtures, skipped orchestration/requeue tests,
-and historical live harnesses are removed. Their scenarios remain in git history
-for US-06/US-07; there is no compatibility backend.
-
 ## Operator setup
+
+For a Linux host, use the [Lima configuration](infra/lima/factory.yaml). Stop
+Rancher Desktop before starting this VM:
+
+```sh
+limactl start --name=factory --tty=false infra/lima/factory.yaml
+limactl shell factory
+```
+
+Transfer a trusted checkout onto the guest's Linux disk using SSH or clone it
+there. From that checkout, explicitly provision/check the host as administrator:
+
+```sh
+sudo ./scripts/provision-host
+sudo ./scripts/provision-host --check
+```
+
+Authentication remains manual. Provisioning failures report a private command-log
+path; inspect it without publishing transcripts. For HTTPS trust failures, obtain
+operator approval for the correct CA rather than disabling verification.
 
 Startup requires Git, authenticated GitHub CLI, authenticated host Pi/Copilot
 (tested Pi **1.3.0**), and a running **local native Linux ARM64** Docker engine.
@@ -129,8 +142,7 @@ are not a distributed lock.
 
    Startup checks artifact-root usability, host tools, local engine architecture,
    GitHub authentication, Copilot bearer endpoint/lifetime, local image architecture,
-   and actual native host-user/tool execution with writable home/caches and `sudo -n`. The uniquely named startup probe has no
-   network, mounts, or credentials and receives bounded cleanup on failure/stop.
+   and native tool execution with writable home/caches and `sudo -n`.
    Cleanup errors block startup; inspect named `factory-startup-*` leftovers only.
 
    The image resolves once to an immutable session ID. Restart to adopt a rebuilt
@@ -150,7 +162,7 @@ are not a distributed lock.
    verification run as the host UID/GID inside one fresh agent. All work, including installations,
    builds, cleanup before publication, and publication, consumes that deadline.
    Missing entrypoints, setup/provider/lifecycle errors, or failed verification
-   fail visibly without repair in this delivery.
+   fail visibly without automatic repair.
 
 6. The runner removes the agent and known owned services/resources, then confirms
    host access required for publication without changing workspace ownership/modes.
@@ -186,12 +198,10 @@ npm ci
 uv sync --frozen
 ```
 
-**Upgrade:** explicitly rebuild the shared image and restart the runner. Older
-images without configured `sudo` fail startup. Adapt setup scripts that assumed
-root; global npm installs now use the user-local prefix. Fixed trusted root code
-initializes only the container account/home and socket groups, not the workspace.
-UID-only Docker exec resolves the configured primary/supplementary groups. Running
-the host runner as UID 0 still means root; UID matching is not a security boundary.
+**Upgrade:** explicitly rebuild the shared image and restart the runner.
+Setup scripts must use explicit `sudo -n` for system installs and the user-local
+prefix for npm tools. Workspace ownership and permissions are never repaired
+automatically. Matching numeric user IDs is not a security boundary.
 
 The agent mounts the workspace at its same absolute host/container path and
 connects to the selected local engine. On macOS the engine-side socket mount is
@@ -210,8 +220,7 @@ intercept Docker commands or guarantee rejection of explicit platform overrides,
 which may invoke emulation if the operator's engine supports it. Actual
 Docker/setup/verification failures remain visible; the factory never selects an
 emulation fallback or substitutes dependencies. Existing containers retain their
-current filesystem until removed; the host-user/sudo change requires the explicit
-image rebuild and runner restart described above.
+current filesystem until removed; rebuilding an image does not update them.
 
 Ordinary Compose commands inherit unique matching `FACTORY_RUN_ID` and
 `COMPOSE_PROJECT_NAME`. Direct container/network/disposable-volume creation must
@@ -251,20 +260,22 @@ mandatory, even after passing local verification.
 
 ## Verification beyond unit tests
 
-Docker/CLI tests use real local dependencies and scripted Pi/GitHub boundaries;
-they make no live Copilot request or GitHub write. ARM64 CI cannot prove desktop
-sharing/networking. The [current slice](docs/slices/current-slice.md) records local
-provider/browser evidence, exact commands, coverage, and outstanding gaps.
+The explicit host-provisioning E2E, `FACTORY_PROVISION_TESTS=1 uv run --frozen pytest
+tests/test_provision_lima.py -q`, installs/checks the existing authorized Lima instance
+named `factory` as administrator and repeats provisioning to check data preservation.
+It does not allocate a VM or authenticate. Enable it only with explicit permission
+to modify that guest; it is not an ordinary non-mutating test. Configuration-only
+validation skips where Lima is absent.
 
-No live authenticated probe is enabled by these commands. Historical live
-harnesses are removed; any new Copilot/GitHub-writing demonstration requires
-separate explicit approval. US-06 recovery and US-07 manual-requeue acceptance
-remain future work; historical acceptance is not evidence for them.
+Docker/CLI tests use real local dependencies and scripted Pi/GitHub boundaries;
+they make no live Copilot request or GitHub write. Linux CI alone does not verify
+macOS-to-VM service access. Live authenticated checks require separate explicit
+approval.
 
 ## Architecture and repository structure
 
 [Architecture](docs/architecture/service-architecture.md),
-[workflow](docs/workflows/issue-to-draft-pr.md), [spec](SPEC.md), and
+[workflow](docs/simplified_worflow.md), [spec](SPEC.md), and
 [contracts](docs/contracts.md) describe the shared-image boundaries.
 
 - `agent/`: pinned shared-image build definition/instructions.

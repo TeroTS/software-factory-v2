@@ -1,0 +1,33 @@
+# Explicit local Ubuntu host allocation; factory tools/accounts are provisioned separately.
+minimumLimaVersion: 2.2.1
+vmType: vz
+arch: aarch64
+cpus: 4
+memory: 8GiB
+disk: 40GiB
+images:
+  - location: https://cloud-images.ubuntu.com/releases/noble/release-20260926/ubuntu-24.04-server-cloudimg-arm64.img
+    arch: aarch64
+    digest: sha256:1d6bffe64b848468ac97f821d369a4846d983de1800ccf6b5ec8853e85cefc55
+mounts: []
+containerd:
+  system: false
+  user: false
+vmOpts:
+  vz:
+    rosetta:
+      enabled: false
+upgradePackages: false
+ssh:
+  loadDotSSHPubKeys: false
+  forwardAgent: false
+portForwards:
+  - guestPort: 8080
+    hostPort: 8080
+    hostIP: 127.0.0.1
+    proto: tcp
+  - guestIP: 0.0.0.0
+    guestIPMustBeZero: false
+    guestPortRange: [1, 65535]
+    proto: any
+    ignore: true

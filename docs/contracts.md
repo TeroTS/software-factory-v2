@@ -2,27 +2,16 @@
 
 ## Purpose
 
-Define the factory's valid non-HTTP contracts: existing behavior still in use and
-accepted changes to implement next under US-08–US-10 in [SPEC.md](../SPEC.md).
-[DECISIONS.md](../DECISIONS.md) is the source of accepted policy;
-[CONTEXT.md](../CONTEXT.md) supplies domain naming. Contracts are not a historical
-backlog: retain working interfaces, update changed requirements, and remove
-superseded or out-of-scope contracts.
+Define the factory's accepted non-HTTP interfaces and behavioral guarantees.
+[SPEC.md](../SPEC.md) defines product requirements,
+[DECISIONS.md](../DECISIONS.md) defines accepted policy, and
+[CONTEXT.md](../CONTEXT.md) supplies domain naming. Implementation state and
+verification evidence belong only in the [current slice](slices/current-slice.md).
 
-Each contract states its implementation status. Existing coordination,
-credentials, first-pass verification, diagnostics, cleanup, and publication
-remain in use. Fixed-identity provisioning/startup/execution are planned changes,
-not claims about the current runtime. Within mixed contracts, the fixed identity,
-image-build account setup, socket `--group-add`, and Linux-host/Lima development requirements
-are planned; other existing guarantees remain applicable. No parallel runtime
-backend, verification repair loop, or new manual-requeue workflow is introduced.
-
-Planned deployment constants are account/group `factory`, UID/GID `2000:2000`,
-and Ubuntu Server 24.04 LTS ARM64. Existing execution constants remain one
-repository/runner, one issue run at a time, 30-second polling, and the original
-900-second deadline. No new identity, retry, or backend settings enter TOML.
-Previously recorded desktop-provider evidence does not prove planned Linux VM/
-fixed-identity behavior.
+The deployment environment is the local Ubuntu Server 24.04 LTS ARM64 Lima VM,
+with account/group `factory`, UID/GID `2000:2000`. Execution uses one repository,
+one runner, one issue run at a time, 30-second polling, and a 900-second deadline.
+Identity, retry, and backend selection are not operator TOML settings.
 
 ## HTTP Contract Source
 
@@ -32,10 +21,6 @@ fixed-identity behavior.
 ## Non-HTTP Contract Inventory
 
 ### Contract 1: Local runner invocation and repository configuration
-
-Status: in use; fixed host/image identity validation is planned under US-09.
-Existing interfaces: [config](../src/software_factory/config.py) and
-[CLI/preflight](../src/software_factory/runner.py).
 
 - Kind: Terminal invocation and trusted operator-owned TOML configuration.
 - Producers / Owners: Operator.
@@ -97,10 +82,6 @@ Existing interfaces: [config](../src/software_factory/config.py) and
 
 ### Contract 2: Issue discovery, skip handling, and immutable task input
 
-Status: in use, unchanged by the migration. Implemented by
-[GitHub coordination](../src/software_factory/github.py) and
-[the runner](../src/software_factory/runner.py).
-
 - Kind: GitHub label-driven request and captured issue snapshot.
 - Producers / Owners: Operator owns label application and issue content; GitHub
   owns issue identity; the local runner owns the captured snapshot.
@@ -145,12 +126,6 @@ Status: in use, unchanged by the migration. Implemented by
 
 ### Contract 3: Shared agent environment and Copilot credentials
 
-Status: shared-image execution and credentials are in use. Build-time fixed
-identity and socket-group launch/exec changes are planned under US-09/US-10;
-current runtime account initialization is to be replaced, not retained as a
-fallback. Existing boundaries: [agent lifecycle](../src/software_factory/sandbox.py)
-and [Python Pi wrapper](../src/software_factory/sandbox_agent.py).
-
 - Kind: Local-runner-to-Docker execution boundary and unattended Pi invocation.
 - Producers / Owners: The factory repository owns the shared image definition;
   the operator builds it and owns credentials; the local runner owns the
@@ -194,7 +169,7 @@ and [Python Pi wrapper](../src/software_factory/sandbox_agent.py).
   - Pi invocation: one-shot print interface, explicit configured
     `github-copilot` model, coding tools, and nonpersistent sessions. Each call
     receives the immutable snapshot and current workspace. Preserve the standalone
-    Python wrapper; the migration does not introduce repair invocations. Disable
+    Python wrapper without repair invocations. Disable
     discovered extensions, MCP, skills, prompt templates, themes, and trust-gated
     project configuration.
     Repository context may supply instructions, not additional security guarantees.
@@ -231,17 +206,12 @@ and [Python Pi wrapper](../src/software_factory/sandbox_agent.py).
 
 ### Contract 4: First-pass entrypoints, verification result, and deadline
 
-Status: in use; only execution identity/socket membership changes under US-10.
-Implemented by [verification](../src/software_factory/sandbox.py),
-[orchestration](../src/software_factory/runner.py), and
-[command deadlines](../src/software_factory/process.py).
-
 - Kind: Executable repository entrypoints and exit-status/feedback protocol.
 - Producers / Owners: Target repository owns entrypoints and CI alignment;
   local runner owns first-pass ordering and deadline.
 - Consumers: Pi, local runner, and independent target CI.
 - Trigger / Direction: Run setup before Pi implementation, then canonical
-  verification. This migration does not add a repair loop.
+  verification, without an automatic repair loop.
 - Payload / Shape:
 
   | Command/result | Meaning |
@@ -275,7 +245,7 @@ Implemented by [verification](../src/software_factory/sandbox.py),
   - A completed verification failure fails this first-pass issue run. Do not add
     implicit repairs, reset the environment/deadline, or automatically requeue.
     Preserve the distinction between completed check failure and Docker execution
-    failure; neither authorizes an extra implementation attempt in this migration.
+    failure; neither authorizes an extra implementation attempt.
   - Verification must be safe to rerun. Passing still requires completed cleanup,
     time remaining, and nonempty changes before publication.
 - Visibility / Security: Output may be sensitive and agent-influencing. Keep
@@ -290,11 +260,6 @@ Implemented by [verification](../src/software_factory/sandbox.py),
   not extend implementation or publication time.
 
 ### Contract 5: Host-side publication and draft PR identity
-
-Status: in use, unchanged by the migration. Implemented by
-[trusted Git publication](../src/software_factory/repository.py),
-[PR creation](../src/software_factory/github.py), and
-[publication gates](../src/software_factory/runner.py).
 
 - Kind: Trusted host Git publication and GitHub draft PR creation.
 - Producers / Owners: Local runner publishes; human reviewer owns merge decisions.
@@ -330,10 +295,6 @@ Status: in use, unchanged by the migration. Implemented by
   uncertain publication writes.
 
 ### Contract 6: GitHub status and private diagnostic lifecycle
-
-Status: in use, unchanged by the migration. Implemented by
-[runner status/artifact handling](../src/software_factory/runner.py) and
-[private command diagnostics](../src/software_factory/process.py).
 
 - Kind: Human-readable issue comments, trigger lifecycle, and private artifacts.
 - Producers / Owners: Local runner records outcomes; operator owns requeue,
@@ -379,10 +340,6 @@ Status: in use, unchanged by the migration. Implemented by
   preserve previous artifacts and avoid deleting another run's resources.
 
 ### Contract 7: Run identity, Docker ownership, and scoped cleanup
-
-Status: in use, retained by the migration. Existing boundaries:
-[resource identity/cleanup](../src/software_factory/sandbox.py) and
-[required publication access](../src/software_factory/repository.py).
 
 - Kind: Agent-visible run context, Docker ownership metadata, and lifecycle gate.
 - Producers / Owners: Local runner creates identity and host-owned cleanup records;
@@ -434,11 +391,6 @@ Status: in use, retained by the migration. Existing boundaries:
 
 ### Contract 8: Target services, networking, and architecture
 
-Status: native Docker/Compose execution and explicit service addressing are in
-use. Native Linux-disk execution and Lima host-to-guest acceptance replace the
-direct macOS desktop-provider model under US-08/US-10. Existing defaults/mounts:
-[agent lifecycle](../src/software_factory/sandbox.py).
-
 - Kind: Agent-to-local-Docker application/dependency execution and test connectivity.
 - Producers / Owners: Target repository owns ordinary application Compose/build
   configuration, setup/verify scripts, and test endpoint configuration.
@@ -488,17 +440,17 @@ direct macOS desktop-provider model under US-08/US-10. Existing defaults/mounts:
 
 ### Contract 9: Explicit Linux host provisioning and Lima environment
 
-Status: planned under US-08; no provisioning entrypoint or Lima configuration is
-implemented yet. This is the new host-preparation boundary, not a replacement for
-existing target setup or runner configuration.
+Host preparation is separate from target setup and runner configuration. Use the
+[Lima configuration](../infra/lima/factory.yaml) and
+[explicit provisioning entrypoint](../scripts/provision-host).
 
 - Kind: Operator-invoked host provisioning entrypoint/runbook and repository-owned
   VM configuration. No new HTTP API, operator TOML fields, or job schema.
 - Producers / Owners: The factory repository owns provisioning instructions,
   version/source verification, and Lima configuration; the operator authorizes
   installation, VM resources/network exposure, and host administration.
-- Consumers: A persistent local Lima guest or an authorized production-like
-  EC2/equivalent host, the factory account, and later runner startup.
+- Consumers: The persistent local Lima guest, the factory account, and later
+  runner startup. No separate production-like deployment is in scope.
 - Trigger / Direction: An explicitly authorized Ubuntu Server 24.04 LTS ARM64
   host is prepared using the same provisioning entrypoint/runbook. Provisioning
   is separate from runner startup and target `./scripts/setup`.
@@ -524,12 +476,9 @@ existing target setup or runner configuration.
   | Pi 1.3.0 | npm `@earendil-works/pi-coding-agent@1.3.0`, installed under the factory account. |
 
   Verify release availability, exact APT versions, and checksum/signature trust
-  sources before implementing installation commands; record resolved versions
-  and verification evidence. Exact Lima/Ubuntu image pins, resource allocation,
-  and network settings remain the provisioning details identified in SPEC.md,
-  not inferred defaults or newly approved policy. No mandatory JSON report,
-  additional configuration format, or fixed provisioning script filename is
-  introduced here; the implementation must document its invocation/results.
+  sources before installation. Release/image pins, resource allocation, and
+  network settings require operator approval, not inferred defaults. No mandatory
+  JSON report or additional operator configuration format is required.
 - Ordering / Idempotency expectations: Provision only through explicit operator
   action on the designated host. Detect account/name/ID conflicts without
   renumbering existing accounts. Repeated execution validates/reuses correct
@@ -550,38 +499,3 @@ existing target setup or runner configuration.
   destructive account/artifact migration. If a release cannot be verified, ask
   the operator before changing source/version. Subsequent explicit provisioning
   must preserve existing correct state; it is not an automatic runner retry.
-
-## Slice Handoff
-
-- Contract artifacts implementers must read:
-  - `docs/contracts.md`
-- Next step: `$lean-story-delivery`, starting with US-08. List the relevant
-  contract numbers and this artifact under `## Contract Inputs` in
-  `docs/slices/current-slice.md` when planning the slice. Existing slice evidence
-  describes the previous runtime and must not be treated as migration acceptance.
-- Story mapping:
-  - US-08: Contract 9, with Contract 1's manual-authentication/startup boundary.
-  - US-09: Contracts 1 and 3, plus startup diagnostic/cleanup requirements in
-    Contracts 6 and 7; Contract 9 supplies the provisioned host prerequisite.
-  - US-10: Contracts 2–8 through the unchanged first-pass workflow on the fixed
-    host/image identity, preserving Contract 1's validated startup/configuration.
-- Required evidence: readiness from explicit/repeated provisioning; fixed-account
-  CLI startup; real Linux ARM64 Git/Docker/Compose/service-backed issue E2E with
-  scripted Pi/GitHub; actual exec supplementary socket access when socket and
-  primary GIDs differ; native-disk sibling mounts; writable home/user-local tools;
-  explicit sudo; compatible workspace output/disposable service volumes; and
-  macOS access to a fixture port through the Lima VM's explicit network path.
-- Cover identity conflicts/root/wrong IDs, old images, failed release verification,
-  unavailable engine/socket membership, setup/verification/provider failures,
-  timeout/SIGTERM/partial startup, cleanup/access failure, and uncertain publication.
-  Preserve unrelated sentinel resources and old diagnostics. Remove obsolete
-  runtime-account initialization/callers/fixtures without losing useful regressions.
-- Repeat provisioning and real boundaries on an authorized disposable production-
-  like host using the same entrypoint. VM/CI evidence does not establish cloud
-  networking/storage; no paid resources or live authenticated services are
-  authorized by these contracts. If exec group feasibility contradicts the
-  accepted mechanism, return evidence to the operator instead of choosing a fallback.
-- Preserve format → lint → tests/coverage and the unchanged Python overall
-  line/branch 80% gate, including the standalone Python wrapper and new business
-  logic. ARM64 CI executes under the fixed identity. Update current instructions
-  and distinguish target requirements, actual verification, and remaining gaps.
