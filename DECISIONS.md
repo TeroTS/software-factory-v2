@@ -1,17 +1,17 @@
 # Docker-enabled Autonomous Coding Factory Decisions
 
-Status: Draft v1 — decisions accepted; implementation and acceptance evidence pending
+Status: decisions accepted — fixed-identity Linux deployment update pending specification, implementation, and acceptance
 
 ## Problem Summary
 
 Replace the prepared, target-specific Compose sandbox with one shared Linux agent image connected to the existing local Docker engine. A target repository should need ordinary setup/verify entrypoints and its application Compose configuration, not a factory-specific agent image or Compose definition. Preserve the existing issue-to-draft-PR workflow.
 
-This record supersedes the previous execution-model decisions. It consolidates `docs/plans/docker-enabled-agent.md` and the operator interview. In particular, exact-image local tryouts proposed in that plan are excluded. Existing `SPEC.md`, contracts, and implementation still describe the old model and require subsequent updates; this interview does not change them.
+This record supersedes the previous execution-model decisions. It consolidates `docs/plans/docker-enabled-agent.md` and the operator interviews. In particular, exact-image local tryouts proposed in that plan are excluded. The latest accepted update selects the fixed-identity Linux host defined below. `DECISIONS.md` is the sole source of accepted decisions. This update supersedes arbitrary-host-ID initialization and direct macOS runner support. `SPEC.md`, contracts, and implementation still describe the delivered host-user model; update the specification/contracts before implementing this deployment change. These decisions are not acceptance evidence.
 
 ## Goals and Success Criteria
 
 - Build images, start ordinary target Compose services, and execute service-backed E2E checks from the shared agent environment.
-- Support native `linux/arm64` locally, including an Apple Silicon Mac using a local Linux-container Docker provider.
+- Support Ubuntu Server 24.04 LTS ARM64 hosts: a local Lima VM on Apple Silicon for development/testing and uniformly provisioned ARM64 EC2/equivalent hosts for production.
 - Eliminate target-specific factory sandbox preparation and retain exactly one execution path.
 - Preserve serial issue processing, the 900-second issue-run deadline, three verification repairs, host-side publication, duplicate protection, and fresh manual requeue.
 - Demonstrate same-path workspace mounts, target-specific tool installation, explicit service networking, host-usable files, and scoped cleanup across success and failure paths.
@@ -33,7 +33,8 @@ This record supersedes the previous execution-model decisions. It consolidates `
 - Issue eligibility analysis, clarification conversations, automatic merging, or PR revisions from review feedback.
 - Webhooks, HTTP APIs, dashboards, a database, or session recovery.
 - A legacy sandbox backend, backend selection framework, or automatic configuration migration.
-- A factory-managed VM, remote Docker engine, EC2/cloud deployment, or ECS Fargate support.
+- Automatic VM/cloud resource provisioning by the runner, a remote Docker engine, ECS Fargate, or a cloud deployment framework. Explicit host provisioning for Lima and ARM64 EC2/equivalent hosts is in scope; creating paid resources requires separate authorization.
+- Direct macOS runner execution, arbitrary host UID/GID support, parallel fixed/dynamic identity backends, and automatic host-account or retained-artifact migration.
 - AMD64 emulation or general multi-architecture support.
 - Transparent compatibility for tests that hardcode sibling services at the agent's `localhost`.
 - A pre-setup Pi bootstrap phase, setup repair, or host-runner installation of target tools.
@@ -80,10 +81,16 @@ This record supersedes the previous execution-model decisions. It consolidates `
 ### Operations / Deployment
 
 - Connect the agent to the existing local host Docker engine and mount the workspace at the same absolute host/container path.
-- Operator-approved US-05 correction: start the agent with the host UID/GID and run setup, Pi, and verification as that user, with writable container-local home/caches. Add `sudo` from the pinned image snapshot and support explicit `sudo -n` system installs; do not elevate whole phases or automatically retry permission failures as root. Fixed trusted root initialization may configure only the container account/home/socket-group access, not workspace permissions. Docker access/elevation remain effective root access, not isolation.
-- Remove recursive workspace ownership/permission restoration. Clean known owned resources before publication and fail visibly if the host cannot access required publication files. Preserve unchanged failed workspaces/private host-owned logs; deliberately inaccessible files require operator inspection. Do not require ignored caches to be writable or silently repair them. Matching host UID 0 remains root; no new root-runner rejection policy.
+- Fixed-identity deployment supersedes the earlier arbitrary-host-user correction: use account/group `factory`, UID/GID `2000:2000`, on both the Ubuntu host and shared agent image. Reject a mismatched or root runner identity before issue claims; do not switch accounts automatically. Provisioning must fail on name/ID conflicts rather than renumber existing accounts. The IDs are deployment constants, not new TOML fields.
+- Build the agent account, home/caches, and sudo configuration into the image. Remove runtime account/shadow/group initialization. Ordinary setup, Pi, and verification run as the fixed non-root user; explicit `sudo -n` system installs retain root HOME selection. Do not elevate whole phases, retry permission failures as root, or grant the host factory account general passwordless sudo. Docker access/elevation remain effective engine/host control, not isolation.
+- Discover the selected local Docker socket's numeric group and supply it with `--group-add` when creating the agent. Verify supplementary-group access through the actual `docker exec` path before relying on the mechanism. Do not change socket permissions or retain account-mutation/root fallbacks if the mechanism fails.
+- Use Lima for a persistent local Ubuntu Server 24.04 LTS ARM64 VM with SSH access. Run the runner and Docker engine inside the VM and keep repository/workspaces/artifacts on its native Linux disk, not macOS shared folders. Keep VM configuration in the repository, disable unnecessary host-directory sharing, and use explicit host-to-guest service access. Installing Lima or provisioning hosts requires explicit operator action.
+- Reuse one small explicit host provisioning entrypoint and runbook between the VM and production-like hosts. Preserve the terminal runner; no systemd service, AMI pipeline, Terraform, or configuration-management framework is required for this change. Keep gh/Pi authentication manual and private under the factory account.
+- Remove recursive workspace ownership/permission restoration. Clean known owned resources before publication and fail visibly if the host cannot access required publication files. Preserve unchanged failed workspaces/private host-owned logs; deliberately inaccessible files require operator inspection. Do not require ignored caches to be writable or silently repair them. Service-private data belongs in disposable run-owned volumes; workspace-writing services need compatible ownership/permissions, not a blanket requirement to run every service as UID 2000.
+- Host installation sources: Ubuntu signed APT repositories for Git, Make, sudo, curl, CA certificates, and build dependencies; Docker's official signed Ubuntu APT repository for Engine/CLI/Compose/buildx; GitHub CLI's official signed APT repository for gh. Verify availability and record exact APT versions before implementing provisioning; no automatic upgrade policy is established. Verify download checksums/signatures and their trust sources; if a selected release cannot be verified, return to the operator instead of silently substituting a version or source.
+- Install host Python 3.14.3 from the checksum-verified official python.org source release, separately from Ubuntu's system Python. Use official ARM64 Node.js 22.19.0 binaries with checksum/signature verification and the official uv 0.5.13 release binary with checksum verification. Install `@earendil-works/pi-coding-agent@1.3.0` from npm under the factory account. No unversioned `curl | sh` installers or replacement of system Python; release availability and verification metadata remain to be checked.
 - The image baseline includes Pi, Node.js/npm, Docker CLI/Compose, Python/uv, Bash, Git, Make, a C/C++ build toolchain, curl, CA certificates, tar, unzip, and standard Linux utilities. Pin the image's base and installed tool versions in its build definition.
-- Additional runtimes and browser binaries belong in target setup when required; do not introduce host-side tool installation or a new bootstrap phase.
+- Target-specific runtimes and browser binaries belong in target setup when required; do not install target prerequisites on the host or introduce a pre-setup Pi bootstrap. Explicit host provisioning installs only the factory's host prerequisites.
 - Startup requires a compatible agent image already available locally and resolves it to an immutable image ID for the runner session. Missing/incompatible images fail startup; the runner does not build, pull, or fall back.
 - Docker access grants effective engine control and potentially host control. The agent container is an execution environment, not a host-file or credential security boundary.
 
@@ -105,7 +112,7 @@ This record supersedes the previous execution-model decisions. It consolidates `
 3. Poll for `agent:implement`, applying the existing exact factory-PR/branch checks before execution.
 4. Remove the trigger before execution or skip notification. Preserve a matching open PR and return its link; an existing factory branch without an open PR requires operator cleanup and label reapplication.
 5. Claim a clear issue, record running status, snapshot its title/body, and create a fresh default-branch workspace and unique resource identity.
-6. Start the agent container with the host UID/GID, same-path workspace mount, writable container home/caches, and local Docker access. Run setup, implementation, verification, and permitted repairs as that user under the shared deadline; system installs explicitly use `sudo -n`.
+6. Start the agent container as the fixed `factory` UID/GID `2000:2000`, with same-path workspace mount, writable container home/caches, and local Docker access through the discovered socket group. Run setup, implementation, verification, and permitted repairs as that user under the shared deadline; system installs explicitly use `sudo -n`.
 7. Clean owned resources, confirm host access required for publication without rewriting workspace ownership/modes, and publish passing nonempty changes through trusted host Git operations.
 8. Record success with the draft PR link, or a concise failure with private local diagnostics. Never post full transcripts or secrets.
 9. Failure, interruption, or restart never automatically requeues/resumes work. Explicit label reapplication starts a fresh snapshot/workspace, deadline, and repair allowance after duplicate checks.
@@ -133,9 +140,9 @@ This record supersedes the previous execution-model decisions. It consolidates `
 
 ## Operational / Deployment Constraints
 
-- Support local native ARM64 Linux containers, including an Apple Silicon Mac with Docker Desktop/Rancher Desktop providing the engine/VM. No additional factory-managed VM is required.
-- Verify desktop filesystem sharing, sibling relative bind mounts, root-created file ownership, socket access, and agent-to-service networking on the actual local provider. Linux CI does not substitute for those checks.
-- Require real local Docker evidence of image build, ordinary Compose startup, service-backed E2E verification, target-specific installation, and browser access from macOS to a published application port.
+- Use Ubuntu Server 24.04 LTS ARM64 for the Lima VM and production hosts, with the fixed factory account. The shared agent image remains Debian-based; its distribution need not match the host.
+- Verify native Linux workspace/sibling mounts, fixed ownership, actual socket supplementary-group access through exec, and agent-to-service networking in the VM. CI must execute runtime checks under the fixed identity; the hosted runner's default account is not assumed compatible.
+- Require real local Docker evidence of image build, ordinary Compose startup, service-backed E2E verification, target-specific installation, and browser access from macOS to a fixture port exposed by the VM. Repeat scripted-boundary checks on an explicitly authorized disposable EC2/equivalent host using the same provisioning entrypoint; VM evidence does not prove cloud storage/networking.
 - Test cleanup after success, setup failure, exhausted repairs, timeout, interruption, and partial startup. Include an unrelated sentinel container/network/volume and verify preservation.
 - Test cleanup failure blocking publication and preserve deadline, duplicate protection, credential handling, fresh manual requeue, and private retained-diagnostic behavior.
 - Move Docker integration CI to ARM64 and retain existing format/lint/tests and the unchanged Python 80% coverage gate.
@@ -148,17 +155,17 @@ This record supersedes the previous execution-model decisions. It consolidates `
 
 - The operator accepts engine/host exposure from Docker-authorized untrusted task and repository execution.
 - The operator supplies a trusted target, suitable setup/verify scripts, working local Docker, host Git/GitHub CLI/Pi authentication, and accessible Copilot model.
-- The local provider supports same-absolute-path workspace sharing; this remains to be demonstrated rather than assumed proven by engine availability.
+- The provisioned Linux host can run the required pinned tools and local Docker engine under the fixed factory identity. Same-path mounts and socket access must be demonstrated, not inferred from successful provisioning.
 - Target setup can install nonbaseline tools within the shared 900-second budget. The factory does not promise arbitrary repositories work unchanged.
 - Targets may require adaptation for architecture, explicit network addresses, fixed names/ports, external resources, and resource-label conventions.
-- The existing engine reported `linux/aarch64` during the interview. This alone is not evidence for mount, network, cleanup, image, or live coding acceptance.
+- Earlier macOS desktop-provider evidence belongs to the previous host-user model. It does not prove the new Lima/provisioned-host identity, socket, networking, or cleanup behavior.
 - Manually rebuilding/running a checked-out PR may differ from the agent's verified images, dependencies, data, or runtime configuration; exact reproduction is not required.
 
 ## Open Questions
 
-- None requiring additional product policy. Local feasibility demonstrations and exact tested build pins remain delivery/verification work, not established evidence. If those checks contradict the accepted model, return to the operator rather than silently changing it.
+- No unresolved choice among the four deployment decisions: distribution/architecture, account IDs, VM tool, and host installation sources are accepted. Exact Lima release/image pin, VM resources/network settings, APT package versions, release verification metadata, and Docker exec group behavior remain provisioning/verification work. Obtain operator agreement before installing tools, allocating the VM, or creating cloud resources. If feasibility checks contradict the accepted model, return to the operator rather than silently changing it.
 
 ## Ready for Spec Generation
 
 - Status: yes
-- Reason: Scope, configuration migration, image lifecycle/baseline, setup ordering, root execution, ARM64 support, networking expectations, resource ownership/deletion, trust boundaries, manual local evaluation, and acceptance gates are explicit. `$decision-to-spec` can proceed without inventing policy. Production implementation and the required Docker/macOS demonstrations have not been performed by this interview.
+- Reason: The fixed-identity Linux deployment, Ubuntu/ARM64 baseline, `factory` UID/GID 2000:2000, Lima VM, installation sources/pins, preserved workflow/safety invariants, and validation boundaries are accepted. `$decision-to-spec` can update the affected specification without inventing these policies, followed by contract updates. Provisioning, Docker group feasibility, cloud checks, and production implementation remain unperformed; the existing specification/contracts still require reconciliation.

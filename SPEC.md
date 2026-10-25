@@ -3,145 +3,102 @@
 Source: [DECISIONS.md](DECISIONS.md)
 
 ## Summary
-- Replace target-specific factory sandboxes with one shared Linux agent image connected to the existing local Docker engine. The autonomous coding factory still turns labeled GitHub issues into verified draft PRs using Pi/Copilot and trusted host publication. Domain names follow [CONTEXT.md](CONTEXT.md).
-- This is the accepted target behavior, not a claim of implementation. Historical US-01–US-03 cover the previous execution model; their recorded acceptance does not establish the Docker-enabled model. US-04–US-07 below are the new backlog. US-04 startup and US-05 first-pass execution are implemented; US-06/US-07 remain deferred. See the current slice for verification evidence.
-- Docker access grants effective engine control and potentially host control. The agent environment is not a security boundary protecting host files, credentials, or other containers. The operator accepts this exposure; normal credential separation remains useful but cannot prevent deliberate Docker-mediated access.
+- Migrate the autonomous coding factory from arbitrary-host-user initialization to one fixed-identity Linux deployment. Use Ubuntu Server 24.04 LTS ARM64 and account/group `factory`, UID/GID `2000:2000`, on both the host and shared agent image.
+- Development uses a persistent Lima VM on Apple Silicon; production uses uniformly provisioned ARM64 EC2/equivalent hosts. The runner and Docker engine execute inside Linux, with execution data on its native filesystem.
+- This backlog covers only the migration, not previously delivered features or unrelated future work. It is unimplemented target behavior; existing contracts must be reconciled before production changes. Domain names follow [CONTEXT.md](CONTEXT.md).
+- Docker access grants effective engine/host control. Fixed identity and limited ordinary mounts are not security isolation. Preserve existing first-pass behavior, credential handling, cleanup/publication safeguards, and human review requirements from DECISIONS.md.
 
 ## Goals
-- Use one factory-maintained, versioned, native `linux/arm64` agent image across target repositories, without target-specific factory agent images or Compose definitions.
-- Build target images, start ordinary application/dependency Compose services, and execute service-backed E2E verification from the agent environment.
-- Support local ARM64 Linux containers, including Apple Silicon macOS with a local Docker provider; use the same absolute workspace path on host and agent.
-- Preserve one repository/runner, serial issue runs, 30-second polling, a shared 900-second deadline, three verification repairs, duplicate protection, create-only publication, and fresh manual requeue.
-- Clean known run-owned resources on success and failure while preserving unrelated resources and private failed-run diagnostics.
-- Validate real local Docker/macOS boundaries, run Docker integration CI on ARM64, and preserve format/lint/tests and the Python 80% coverage gate, including the standalone Python Pi wrapper.
-- Replace the old execution path completely, reusing coordination/publication logic and removing obsolete validation, configuration, fixtures, and tests as replacements land.
+- Provision local and production-like hosts through one explicit entrypoint/runbook and repository-maintained Lima configuration.
+- Bake the fixed account, writable home/caches, and account-scoped sudo configuration into the existing shared image; remove runtime account/shadow/group initialization.
+- Validate the fixed host/image identity and prove Docker socket supplementary-group access through actual issue execution.
+- Preserve existing CLI/TOML, serial coordination, original deadline, private diagnostics, scoped cleanup, and trusted create-only publication without permission repair.
+- Verify the migration in the Linux VM and an authorized production-like host, with ARM64 CI under the fixed identity and the unchanged Python overall line/branch 80% coverage gate.
 
 ## Non-Goals
-- Multiple repositories, simultaneous runners, parallel issue runs, eligibility analysis, or clarification conversations.
-- Automatic merging, PR review-feedback revisions, automatic requeue, or interrupted-session recovery.
-- A database, HTTP API, dashboard, new orchestration framework, parallel legacy backend, or automatic configuration migration.
-- Remote Docker engines, factory-managed VMs, cloud provisioning/deployment, AMD64 emulation, or general multi-architecture support.
-- Transparent sibling-service `localhost` compatibility, a Pi bootstrap phase before setup, setup repair, or host-side target-tool installation.
-- Automatic shared-agent-image builds/pulls by the runner, daemon-wide pruning, automatic deletion of untracked resources, or hard-crash cleanup.
-- Exact-image local tryouts, retained verified-image manifests, image archives, or a tryout launcher. The operator manually checks out the PR instead.
-- A new live Copilot-to-GitHub-PR demonstration as a completion gate. Live authenticated checks require separate approval.
-- Issue comments, attachments, or linked pages as task inputs; separately billed provider fallback.
-
-## Incremental Delivery Status
-- US-05 replaces the operator-approved US-04 temporary pre-claim guard with first-pass execution and publication. Already-labeled issues become eligible on startup; operators must inspect labels before upgrading. Until US-06 lands, a completed verification failure fails the run without repairs. The full fresh manual-requeue acceptance scenario remains US-07 work. No legacy backend is selectable.
+- Reimplementing existing issue coordination/publication, adding verification repairs, or delivering the full manual-requeue acceptance scenario.
+- Direct macOS runner execution, arbitrary host UID/GID support, parallel identity/backends, automatic account/configuration/artifact migration, or recursive workspace permission repair.
+- Runner-managed VM/cloud creation, remote Docker engines, ECS Fargate, x86-64/emulation support, or a cloud deployment framework. A systemd service, AMI pipeline, Terraform, and configuration-management framework are not required.
+- Changes to polling, concurrency, task inputs, provider selection, automatic requeue/recovery, merging, or review-feedback handling.
+- Target-specific tools installed on the host, setup repair, automatic shared-image builds/pulls, Docker command interception, transparent sibling localhost, or broad resource cleanup.
+- Implicit installation, VM allocation, paid-resource creation, network exposure, or live authenticated Copilot/GitHub checks; these require separate operator authorization.
 
 ## User Stories
 
-### US-04: Start the runner with a shared agent image
+### US-08: Provision a Linux factory host
 Primary actor: Operator
 
-Trigger: The operator is ready to run the factory against one trusted target repository.
+Trigger: An explicitly authorized Ubuntu Server 24.04 LTS ARM64 host is available for factory setup.
 
-Happy-path action: Start the runner with operator-owned configuration and a locally built shared agent image.
+Happy-path action: Prepare the host using the supplied provisioning entrypoint and runbook.
 
-Visible outcome: The runner validates its prerequisites and begins polling without requiring a target-specific factory sandbox.
+Visible outcome: The host has the fixed factory account and validated factory prerequisites, ready for manual authentication and runner startup.
 
-Authoritative state transition: Stopped runner with supplied configuration → validated runner polling the configured repository.
+Authoritative state transition: Unprepared Linux host → provisioned factory host with verified identity/tool access.
 
-Slice boundary: One terminal startup-to-polling outcome through configuration, shared-image availability, local Docker readiness, artifact-root usability, and actionable startup failures. Test startup without processing a real GitHub issue.
+Slice boundary: One provisioning-to-readiness outcome on a local Lima VM, using the same host provisioning entrypoint on an authorized production-like host. No issue processing or automatic authentication is required to demonstrate readiness.
 
 Acceptance criteria:
-- Preserve the existing terminal invocation. Require exactly four nonempty TOML strings: `repository`, `model`, `agent_image`, and `artifacts_dir`, with no credentials or defaults. Preserve GitHub `owner/name` and exact accessible `github-copilot` model semantics; reject invalid, missing, wrong-type, or unknown fields.
-- Reject old `compose_file`/`compose_service` configuration with migration guidance. Do not reinterpret it, automatically migrate it, or retain the old backend.
-- Resolve relative artifact paths against the TOML directory. Validate artifact-root usability before claims where possible; never move/delete previous artifacts implicitly.
-- Supply the shared image definition/build instructions in this factory repository. Its pinned baseline includes Pi, Node.js/npm, Docker CLI/Compose, Python/uv, Bash, Git, Make, a C/C++ toolchain, curl, CA certificates, tar, unzip, and standard Linux utilities, without baked-in credentials.
-- The operator builds the image before startup. Require a compatible local native `linux/arm64` image and resolve it to an immutable image ID for the runner session. Updating it requires restart; missing/incompatible images fail startup without automatic builds, pulls, or fallback.
-- Check host tools/authentication and local engine/execution prerequisites before claiming issues where possible. Reject unsupported architecture rather than silently using emulation. Fail startup nonzero with safe, actionable diagnostics.
-- Retain one runner instance per configured repository, serial execution, and 30-second polling. Labels are not a distributed lock; authentication/access approval remains manual.
-- A focused startup test reaches polling using the new configuration and shared image; negative tests cover legacy configuration, invalid fields, unavailable/incompatible images, unusable artifact paths, and engine failures.
+- Supply repository-maintained configuration/run instructions for a persistent Ubuntu Server 24.04 LTS ARM64 Lima VM with SSH and explicit host-to-guest service access. Keep execution data on its Linux disk and disable unnecessary macOS directory sharing. Installation/allocation is explicit, not a runner startup side effect.
+- Provision account/group `factory` as `2000:2000`, with local Docker access but no general host passwordless sudo. Administrator execution is limited to explicit provisioning. Name/ID conflicts fail clearly without renumbering existing accounts, making the socket world-writable, or migrating previous artifacts.
+- Use Ubuntu's signed APT repositories for Git, Make, sudo, curl, certificates, and build dependencies; Docker's official signed Ubuntu APT repository for Engine/CLI/Compose/buildx; GitHub CLI's official signed APT repository for gh. Verify availability and record exact APT versions before implementing installation commands.
+- Install Python 3.14.3 from the checksum-verified official python.org source separately from system Python; official Node.js 22.19.0 ARM64 binaries with checksum/signature verification; official uv 0.5.13 binaries with checksum verification; and npm `@earendil-works/pi-coding-agent@1.3.0` under the factory account. Validate trust sources; do not use unversioned `curl | sh`, replace system Python, silently substitute unverifiable versions/sources, or introduce automatic upgrades.
+- Validate tools, fixed identity, native engine, and factory-account Docker access. Repeated provisioning validates/reuses correct state without erasing credentials, repositories, or diagnostics. Partial failures are reported, not claimed as readiness. Leave gh/Pi authentication manual and private; never acquire/copy credentials automatically.
+- A focused provisioning check observes readiness without live service access. Cover repeated provisioning, conflicting IDs, unavailable/unverifiable releases, installation failures, and unusable Docker access. Repeat on an authorized disposable EC2/equivalent host; VM results alone do not prove cloud storage/networking.
 
 Deferred follow-ups:
-- US-05: Publish a first-pass result using Docker-enabled execution.
-- US-06: Recover failed verification in that environment.
-- US-07: Manually requeue failed or interrupted work.
+- US-09: Start the runner with the fixed image identity.
+- US-10: Execute issue runs without runtime account initialization.
 
-### US-05: Turn a labeled issue into a Docker-verified draft PR
+### US-09: Start the runner with the fixed factory identity
 Primary actor: Operator
 
-Trigger: An issue receives `agent:implement` while the validated runner is polling.
+Trigger: A provisioned host has manual authentication, existing operator configuration, and an explicitly built updated shared agent image.
 
-Happy-path action: Submit the issue for unattended implementation and verification using the target's ordinary application services.
+Happy-path action: Start the runner under the factory account.
 
-Visible outcome: The issue links to a draft PR containing nonempty verified changes, after owned execution resources are cleaned up.
+Visible outcome: The runner validates the fixed host/image identity and enters polling.
 
-Authoritative state transition: Unclaimed labeled issue → GitHub-recorded successful issue run linked to a draft PR.
+Authoritative state transition: Stopped configured runner → validated fixed-identity runner polling the repository.
 
-Slice boundary: One first-pass issue-to-draft-PR outcome through existing GitHub coordination, a fresh shared-image agent environment, real Docker build/Compose/service-backed verification, scoped cleanup, and trusted host publication. Required failure and trust-boundary checks belong in this slice, not a later cleanup story.
+Slice boundary: One startup-to-polling migration outcome through the existing CLI/preflight path, without processing an issue or redesigning configuration.
 
 Acceptance criteria:
-- Attempt every labeled issue without classification or clarification. Before execution, check for an open PR matching the exact configured head repository and `factory/issue-<number>`. If found, remove the trigger, preserve the PR, and comment with its link; do not infer identity from body text or other branch names.
-- If that remote branch exists without a matching open PR, remove the trigger, skip execution, and request operator branch cleanup and label reapplication. Never overwrite/delete the branch. Confirm trigger removal before execution or skip notification; do not blindly retry uncertain writes.
-- Otherwise claim the issue, record running status, snapshot title/body, and create a fresh workspace from the discovered default branch. Later edits, issue-thread content, attachments, and linked pages do not become run inputs.
-- Start one agent container per issue run with the host UID/GID, using the session's resolved image, local Docker engine access, and a workspace mount at the same absolute path on host and agent. Provide writable container-local home/caches. Run setup, Pi, and verification as that user; support explicit noninteractive `sudo -n` system installs, never automatic elevation on permission errors. Fixed trusted root initialization may configure container account/home/socket access, never repair the workspace. Normal mounts/environment exclude broader host directories/configuration and GitHub publication credentials, despite Docker access being able to bypass these limits.
-- Run setup → Pi implementation → verification inside that environment. Require executable, deterministic, noninteractive `./scripts/setup` and `./scripts/verify`, with verification aligned to target CI. Setup installs any nonbaseline toolchain prerequisites; missing entrypoints or setup failure fails before Pi runs. Do not invent replacement commands or setup repair.
-- Allow target image builds, ordinary Compose startup, and service-backed checks. Validate a native ARM64 engine/shared agent image, explicitly start factory-owned containers as `linux/arm64`, and supply `DOCKER_DEFAULT_PLATFORM=linux/arm64` to target commands. Target scripts must use native-compatible images/tools; the factory does not intercept Docker commands or guarantee rejection of explicit architecture overrides, which may invoke engine-supported emulation. Actual Docker/setup/verification failures remain visible; the factory never selects an emulation fallback or substitutes dependencies.
-- Use explicit test service addresses: Compose DNS when the agent joins the relevant network, or the Docker host address for published ports. Sibling containers do not share the agent's localhost; transparent forwarding is not required.
-- Preserve exact-model Copilot invocation, stdin-only bearer delivery, validated endpoint metadata, temporary configuration, disabled discovered resources, and nonpersistent sessions. Keep broader host Pi settings, refresh credentials, and GitHub write credentials out of normal agent inputs; never fall back to another billing provider.
-- All phases, including workspace preparation, installation/builds, execution, checks, and publication, share one original 900-second deadline. Expiry stops work and fails the run; do not deliberately continue publication after expiry. Bounded cleanup is still required after expiry or interruption.
-- Assign a unique run identity. Ordinary Compose commands inherit `COMPOSE_PROJECT_NAME`; direct containers/networks/volumes must use the factory-provided run label. These are cooperative conventions, not security controls; overrides, unlabeled commands, or other contexts can bypass them.
-- Keep sufficient host-owned identity for cleanup independent of agent-modified Compose files. Stop/remove owned containers before owned networks and disposable owned volumes. Never execute agent-authored teardown scripts on the host, infer ownership from disuse, or prune broadly. Leave unrelated/shared resources, images, build cache, and untracked resources alone; unknown resources and hard-crash leftovers require operator inspection.
-- Stop workspace-mutating processes/services and finish required cleanup before host commit/publication. Cleanup failure or inaccessible required publication files blocks publication and retains private host-owned logs and the unchanged workspace. Do not recursively chown/chmod workspace files or require ignored caches to be writable. Ordinary output uses host ownership; deliberately inaccessible files require operator inspection. Service-private data belongs in disposable owned volumes; workspace-writing services need compatible permissions. Host UID 0 remains root without a new startup restriction.
-- With passing verification, completed cleanup, time remaining, and a nonempty diff, commit using trusted host Git metadata, create the absent remote factory branch, open a draft PR containing `Closes #<number>`, and comment with the actual URL. Ignore agent-authored Git hooks/configuration during host publication. Empty output fails as `no changes produced`; commit/push/PR/reporting failures remain visible, with inspection rather than blind retries of uncertain publication.
-- Failures receive concise issue summaries when possible and retain private local workspaces/logs until operator deletion. Use 0700 run directories, 0600 logs, and known-credential redaction; never publish full transcripts or secrets. Successful diagnostics/workspaces may be removed. Independent target CI and human review remain required; the factory neither merges nor revises from review feedback.
-- Demonstrate the focused flow with real Docker build/Compose/service-backed verification and scripted Pi/GitHub boundaries. Also verify same-path sibling bind mounts, target-specific installation, socket access, host file ownership, and a macOS browser reaching a published application port on the actual local provider. Linux CI alone does not prove desktop sharing/networking.
-- Test cleanup on success, setup/verification failure, timeout, interruption, and partial startup, including cleanup failure blocking publication. Preserve an unrelated sentinel container/network/volume. Test credentials, architecture failures, deadline, duplicates, empty output, publication failures, and private diagnostic retention.
-- Preserve useful existing coordination, deadline, credential-validation, verification-feedback, and publication logic. Complete the removal audit: one execution path, no obsolete callers/compatibility backend, and no obsolete fixtures retained solely to keep removed code alive. Update current instructions, configuration guidance, and architecture/workflow docs to the new model without obsolete isolation claims.
-- Run format/lint/tests and real Docker integration checks on ARM64 with the unchanged Python overall line/branch 80% coverage gate, including the standalone Python Pi wrapper. No production JavaScript remains; the former Node-only coverage harness/gates are retired. Distinguish scripted boundaries from real services; no live Copilot/GitHub-writing demonstration is required or implicitly authorized.
+- Preserve the existing terminal invocation and four-field TOML. UID/GID are deployment constants, not new settings. Reject an unsupported host or effective UID/GID other than `2000:2000`, including root, before issue claims; never switch accounts or elevate the host runner automatically.
+- Build the fixed account/group, writable container-local home/caches/npm prefix, and account-scoped `sudo -n` with root HOME selection into the shared image. Preserve its Debian base and pinned tools. Validate actual account identity, writable home/tool execution, and explicit elevation without runtime account/shadow/group initialization.
+- Reject old/mismatched images with explicit rebuild/restart guidance. Preserve already-local native ARM64 validation, immutable session image ID, explicit operator image builds, and no automatic build/pull/emulation fallback.
+- Retain existing configuration, authentication, artifact-access, startup cleanup, polling, and interruption behavior. Do not alter previous diagnostics or workspace permissions. Any socket-mounted probe is engine-authorized, not host-isolated.
+- A focused real CLI check enters polling using scripted authentication/GitHub boundaries. Test root/wrong identity, incompatible images/home/sudo, and cleanup failures alongside existing preflight regressions. Run ARM64 CI under the fixed account rather than assuming the hosted runner's default identity matches.
 
 Deferred follow-ups:
-- US-06: Recover a verification failure using bounded repairs.
-- US-07: Manually requeue failed or interrupted work.
+- US-10: Verify the fixed identity and socket groups through a complete issue run.
 
-### US-06: Recover a Docker-enabled verification failure
+### US-10: Execute issue runs without runtime account initialization
 Primary actor: Operator
 
-Trigger: Verification fails after the initial implementation in the Docker-enabled agent environment.
+Trigger: The fixed-identity runner is polling and an issue is labeled for implementation.
 
-Happy-path action: Allow the factory to repair failed verification without intervention.
+Happy-path action: Submit the issue through the existing first-pass workflow.
 
-Visible outcome: A draft PR is linked after a permitted repair passes verification and cleanup succeeds.
+Visible outcome: The issue links to a verified draft PR produced using the fixed agent account and Docker socket access, without runtime account mutation.
 
-Authoritative state transition: Running issue run with failed verification → GitHub-recorded successful issue run linked to a draft PR.
+Authoritative state transition: Labeled issue on a validated fixed-identity runner → successful issue run linked to a draft PR after required cleanup.
 
-Slice boundary: One recovery-to-PR outcome using the same agent environment, workspace, canonical verification command, and original deadline. Preserve all US-05 ownership, credential, cleanup, and publication gates.
-
-Acceptance criteria:
-- Give Pi the failed verification output, unchanged issue snapshot, and current workspace; run the same `./scripts/verify` after the repair. Do not reset the agent environment, issue run, or deadline.
-- Permit at most three repair-and-verify cycles after initial implementation. Stop at the first passing verification and publish only nonempty changes after required cleanup, using US-05 gates.
-- Setup, missing entrypoints, provider, Docker lifecycle, cleanup, deadline, and publication failures do not authorize extra verification repair attempts.
-- A third unsuccessful repair or deadline expiry fails the run, attempts bounded cleanup, retains private diagnostics, and creates no PR. Installing/building during repairs consumes the original deadline.
-- A focused recovery test demonstrates service-backed verification failing, receiving repair feedback, then passing and reaching publication. Tests also cover exactly three unsuccessful repairs, deadline expiry during recovery, cleanup after exhaustion, and cleanup failure blocking publication. Scripted Pi/GitHub boundaries are not live acceptance.
-
-Deferred follow-ups:
-- US-07: Manually requeue after failed or interrupted work.
-
-### US-07: Manually requeue Docker-enabled work
-Primary actor: Operator
-
-Trigger: The operator reapplies `agent:implement` after failure or interruption.
-
-Happy-path action: Request a fresh attempt after inspecting diagnostics and resolving any blocking remote branch.
-
-Visible outcome: A new issue run produces a verified draft PR without resuming earlier work or deleting earlier diagnostics.
-
-Authoritative state transition: Failed or interrupted issue awaiting manual requeue → GitHub-recorded successful fresh issue run linked to a draft PR.
-
-Slice boundary: One explicit retry-to-PR outcome through the same Docker-enabled execution and publication path. Include restart inactivity, resource isolation between runs, and preservation of the earlier failed workspace/logs.
+Slice boundary: One migration regression E2E through the existing issue-to-PR workflow, real local Git/Docker services, and scripted Pi/GitHub boundaries. No new coordination, repair, or publication feature is introduced.
 
 Acceptance criteria:
-- Failure, interruption, and restart do not automatically restore the trigger, resume a session, or interpret retained diagnostics as work to execute. Hard-crash resource inspection/cleanup remains manual.
-- Repeat US-05 exact PR/branch checks. Preserve and link matching open PRs; a factory branch without an open PR blocks execution even after a closed PR or uncertain publication. A skip consumes the trigger and requires explicit label reapplication after operator cleanup.
-- A clear requeue takes a fresh title/body snapshot and current default-branch workspace, with a new run identity, 900-second deadline, and up to three verification repairs. Never reuse the failed workspace/session as the baseline.
-- Preserve previous failed artifacts and unrelated Docker resources. Apply all US-05/US-06 architecture, setup ordering, credential, ownership, cleanup, verification, and publication requirements.
-- A focused test interrupts a run, confirms restart alone performs no work, reapplies the label with edited issue content, and reaches a draft PR through fresh Docker execution. Verify old diagnostics remain unchanged and new cleanup cannot remove another run's resources. Scripted external boundaries do not establish live Copilot/GitHub acceptance.
+- Start the agent as the image's fixed factory identity, with existing same-absolute-path Linux workspace mounts and container-local home/caches. Setup, Pi, and verification use that identity. Remove runtime account/shadow/group initialization and its obsolete callers/fixtures; retain one execution path.
+- Discover the selected local socket's numeric GID and pass it at agent creation using `--group-add`. Prove access through the actual `docker exec` path, including when the socket GID differs from the primary GID. Missing access fails visibly without socket chmod, account mutation, root retry, or engine fallback. Return to the operator if the accepted mechanism fails feasibility checks.
+- Preserve setup → Pi → canonical verification, explicit `sudo -n` only for system installs, native target defaults/unmodified Docker CLI, explicit service addressing, and existing stdin-only ephemeral Copilot credential handling. Do not elevate whole phases, repair setup, or add verification repairs.
+- Keep service-private data in disposable run-owned volumes. Workspace-writing services need compatible ownership/permissions, not a blanket UID requirement for every image. Inaccessible required publication files block publication and remain unchanged; no recursive chown/chmod or requirement to make ignored caches writable.
+- Retain the original 900-second deadline, exact duplicate/claim checks, immutable task snapshot, trusted create-only Git/PR publication, private redacted diagnostics, and no automatic retry/requeue/recovery. Stop workspace mutators and complete scoped cleanup before publication; preserve unrelated resources/images/cache and previous artifacts. Cleanup/access failure blocks publication.
+- A focused real CLI E2E observes the existing verified draft-PR result through the new identity/group path. Exercise sibling mounts, target-installed tools, explicit sudo, service volumes/ownership, and a macOS browser reaching a fixture port through the VM's explicit network path. Repeat real boundaries on an authorized production-like host.
+- Preserve failure regressions for setup, verification, provider/credentials, deadline, SIGTERM, partial startup, cleanup/access, and uncertain publication, including unrelated sentinel resources. Keep current instructions accurate and all Python business logic within the unchanged 80% coverage gate; distinguish scripted service boundaries from live authenticated evidence.
 
 Deferred follow-ups:
-- None.
+- None within this migration.
 
 ## Open Questions
-- None requiring product policy. Local provider feasibility and exact tested image/tool pins remain implementation and verification work, not proven acceptance. If validation contradicts these decisions, return to the operator rather than silently changing scope or guarantees.
+- No unresolved choice among OS/architecture, fixed identity, VM tool, or installation sources. Exact Lima release/Ubuntu image pin, VM resources/network exposure, APT versions, and verification metadata remain provisioning work requiring the stated operator agreement; this specification does not choose them.
+- Docker supplementary-group behavior through the actual exec path remains unproven. If verification contradicts `--group-add`, return to the operator rather than silently choosing a fallback.
+- Cloud sizing/access and authorization remain deployment work. No paid instance, new network exposure, or live Copilot/GitHub-writing check is authorized by this specification.
