@@ -148,6 +148,10 @@ def test_failure_retains_private_diagnostics_without_false_success(runtime, comp
     assert "diagnostics" in caplog.text
     if component == "sandbox":
         sandbox.stop.assert_called_once()
+    if method == "start":
+        sandbox.setup.assert_not_called()
+        sandbox.implement.assert_not_called()
+        repo.commit.assert_not_called()
     if method == "setup":
         sandbox.implement.assert_not_called()
 

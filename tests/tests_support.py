@@ -31,7 +31,13 @@ def target_repository(workspace: Path) -> None:
                     "web": {
                         "build": ".",
                         "image": "software-factory-fixture:${FACTORY_RUN_ID}",
-                        "volumes": ["./site:/site:ro", "data:/data"],
+                        "user": "0:0",
+                        "command": [
+                            "sh",
+                            "-ec",
+                            "printf private > /data/private; chmod 600 /data/private; exec python -m http.server 8080",
+                        ],
+                        "volumes": ["./site:/site:ro", "data:/data", "./service-output:/output"],
                         "ports": ["127.0.0.1::8080"],
                         "healthcheck": {
                             "test": [
@@ -51,7 +57,9 @@ def target_repository(workspace: Path) -> None:
         )
     )
     stub = """#!/usr/local/bin/python
-import json, pathlib, sys
+import json, os, pathlib, sys
+assert os.getuid() == os.getgid() == 2000
+assert os.stat('/var/run/docker.sock').st_gid in os.getgroups()
 if '--list-models' in sys.argv:
     print('github-copilot chosen 128k 4k')
 else:
@@ -64,11 +72,19 @@ else:
 """
     (workspace / "fixture-pi").write_text(stub)
     for name, body in {
-        "setup": "npm install --global --ignore-scripts ./fixture-tool\n"
+        "setup": 'test "$(id -u):$(id -g)" = 2000:2000\n'
+        'sudo -n sh -ec \'test "$HOME" = /root; test "$(id -u)" = 0\'\n'
+        "npm install --global --ignore-scripts ./fixture-tool\n"
         'install -m 755 fixture-pi "$HOME/.local/bin/pi"\n'
+        "mkdir -p service-output\n"
         "docker compose up --build --detach --wait\n"
-        'docker network connect "${COMPOSE_PROJECT_NAME}_default" "$FACTORY_RUN_ID"\n',
-        "verify": 'test "$(factory-fixture-prerequisite)" = target-installed\n'
+        'docker network connect "${COMPOSE_PROJECT_NAME}_default" "$FACTORY_RUN_ID"\n'
+        "docker compose exec -T --user 2000:2000 web sh -ec 'printf service-written > /output/owned'\n",
+        "verify": 'test "$(id -u):$(id -g)" = 2000:2000\n'
+        'test "$(factory-fixture-prerequisite)" = target-installed\n'
+        'test "$(docker compose exec -T web stat -c %u:%a /data/private)" = 0:600\n'
+        'test "$(stat -c %u:%g service-output/owned)" = 2000:2000\n'
+        'test "$(cat service-output/owned)" = service-written\n'
         'test "$(uname -m)" = aarch64\n'
         "curl --fail --silent http://web:8080/ > service-response\n"
         "grep -qx implemented service-response\n",

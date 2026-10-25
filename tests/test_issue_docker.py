@@ -169,6 +169,12 @@ print(json.dumps(result))
             [real_git, "--git-dir=" + str(remote), "show", "factory/issue-1:site/index.html"], text=True
         )
         assert content == "implemented\n"
+        assert (
+            subprocess.check_output(
+                [real_git, "--git-dir=" + str(remote), "show", "factory/issue-1:service-output/owned"], text=True
+            )
+            == "service-written"
+        )
         assert state["payload"]["draft"] is True
         assert list(previous.parent.iterdir()) == [previous]
     else:

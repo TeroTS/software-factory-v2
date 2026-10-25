@@ -73,7 +73,12 @@ user-local prefix are created at build time. The prefix's `bin` directory leads
 PATH. Startup validates the image's actual default execution identity, account,
 writable directories, tools, and noninteractive sudo without a root account-setup
 exec or account/shadow/group mutation. The socket-free startup probe does not
-prove issue-run Docker access.
+prove issue-run Docker access. Each issue-run agent receives the selected local
+socket's actual numeric GID through `--group-add`. Before setup, the runner uses
+`docker exec -i` without a user override to validate UID/GID 2000:2000,
+supplementary socket membership, and engine access. Neither agent creation nor
+exec initializes accounts or edits account/shadow/group files; access failure
+ends the run without socket permission changes or root fallback.
 
 Only factory has passwordless sudo configured by the image, with root HOME
 selection. Setup scripts that assumed root need adaptation: use explicit

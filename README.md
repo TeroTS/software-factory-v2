@@ -171,8 +171,12 @@ are not a distributed lock.
 
 5. A clear issue gets running status, an immutable title/body snapshot, a fresh
    default-branch workspace, and one original 900-second deadline. Setup → Pi →
-   verification run as the host UID/GID inside one fresh agent. All work, including installations,
-   builds, cleanup before publication, and publication, consumes that deadline.
+   verification run as the baked factory account (2000:2000) inside one fresh agent.
+   Before setup, the runner validates actual exec identity and Docker access using
+   the selected socket's numeric GID, supplied at creation with `--group-add`.
+   It does not initialize accounts, override the exec user, or retry as root.
+   All work, including installations, builds, cleanup before publication, and
+   publication, consumes that deadline.
    Missing entrypoints, setup/provider/lifecycle errors, or failed verification
    fail visibly without automatic repair.
 

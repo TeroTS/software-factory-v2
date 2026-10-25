@@ -1,5 +1,5 @@
 import json
-import os
+import socket
 import time
 from pathlib import Path
 from unittest.mock import Mock
@@ -13,13 +13,17 @@ IMAGE = "sha256:" + "a" * 64
 
 
 @pytest.fixture
-def sandbox(tmp_path: Path):
+def sandbox(tmp_path: Path, monkeypatch):
     commands = Mock()
     commands.secrets = ["private-bearer"]
     commands.log = tmp_path / "run.log"
     commands.run.return_value = ""
-    instance = Sandbox(IMAGE, "unix:///local/docker.sock", tmp_path, commands)
-    return instance, commands
+    path = tmp_path / "docker.sock"
+    monkeypatch.chdir(tmp_path)
+    with socket.socket(socket.AF_UNIX) as listener:
+        listener.bind(path.name)
+        instance = Sandbox(IMAGE, "unix://" + str(path), tmp_path, commands)
+        yield instance, commands
 
 
 def test_shared_image_start_has_same_path_socket_and_cooperative_identity(sandbox, monkeypatch) -> None:
@@ -30,7 +34,8 @@ def test_shared_image_start_has_same_path_socket_and_cooperative_identity(sandbo
     args = start.args[0]
     assert IMAGE in args
     assert args[args.index("--platform") + 1] == "linux/arm64"
-    assert args[args.index("--user") + 1] == f"{os.getuid()}:{os.getgid()}"
+    assert "--user" not in args
+    assert args[args.index("--group-add") + 1] == str(Path(instance.socket_path).stat().st_gid)
     workspace = str(instance.directory / "workspace")
     assert f"type=bind,src={workspace},dst={workspace}" in args
     assert f"type=bind,src={instance.socket_path},dst=/var/run/docker.sock" in args
@@ -42,29 +47,44 @@ def test_shared_image_start_has_same_path_socket_and_cooperative_identity(sandbo
     assert "host-secret" not in " ".join(args)
     assert "--pull=never" in args
     assert len(commands.run.call_args_list) == 2
-    initialize = commands.run.call_args_list[1]
-    assert initialize.args[1] == "agent user configuration"
-    assert initialize.args[0][:5] == ["docker", "exec", "--user", "0:0", instance.project]
-    script = Path(__file__).resolve().parents[1] / "src/software_factory/sandbox_user_setup.py"
-    assert script.is_file(), "user setup must be a standalone Python script"
-    assert initialize.args[0][5:] == [
-        "/usr/local/bin/python",
-        "-I",
-        "-c",
-        script.read_text(),
-        str(os.getuid()),
-        str(os.getgid()),
-    ]
+    validation = commands.run.call_args_list[1]
+    assert validation.args[1] == "agent identity and Docker access"
+    assert validation.args[0][:4] == ["docker", "exec", "-i", instance.project]
+    probe = validation.args[0][-1]
+    assert 'test "$(id -u)" = 2000' in probe
+    assert 'test "$(id -g)" = 2000' in probe
+    assert "id -G" in probe
+    assert "docker info" in probe
     assert "HOME=/tmp/factory-home" in args
     assert "XDG_CACHE_HOME=/tmp/factory-home/.cache" in args
-    assert instance.base == ["docker", "exec", "--user", str(os.getuid()), "-i", instance.project]
+    assert instance.base == ["docker", "exec", "-i", instance.project]
 
 
-@pytest.mark.parametrize("platform,expected", [("darwin", "/var/run/docker.sock"), ("linux", "/local/docker.sock")])
-def test_socket_mount_uses_daemon_path_not_desktop_host_proxy(tmp_path, monkeypatch, platform, expected) -> None:
-    monkeypatch.setattr("software_factory.sandbox.sys.platform", platform)
-    instance = Sandbox(IMAGE, "unix:///local/docker.sock", tmp_path, Mock())
-    assert instance.socket_path == expected
+@pytest.mark.parametrize("kind", ["missing", "file", "directory"])
+def test_unusable_socket_fails_before_container_creation(tmp_path, kind) -> None:
+    path = tmp_path / "docker.sock"
+    if kind == "file":
+        path.touch()
+    elif kind == "directory":
+        path.mkdir()
+    commands = Mock()
+    instance = Sandbox(IMAGE, "unix://" + str(path), tmp_path, commands)
+    with pytest.raises(FactoryError, match="Docker socket"):
+        instance.start()
+    commands.run.assert_not_called()
+
+
+def test_socket_stat_failure_is_safe(sandbox, monkeypatch) -> None:
+    instance, commands = sandbox
+
+    def denied(path):
+        raise PermissionError("private filesystem details")
+
+    monkeypatch.setattr(Path, "stat", denied)
+    with pytest.raises(FactoryError, match="Docker socket") as error:
+        instance.start()
+    assert "private filesystem details" not in str(error.value)
+    commands.run.assert_not_called()
 
 
 def test_setup_implementation_and_verification_stay_inside_agent(sandbox) -> None:
@@ -76,12 +96,12 @@ def test_setup_implementation_and_verification_stay_inside_agent(sandbox) -> Non
     calls = commands.run.call_args_list
     assert [call.args[1] for call in calls] == ["required entrypoints", "setup", "implementation", "verification"]
     for call in calls:
-        assert call.args[0][:6] == ["docker", "exec", "--user", str(os.getuid()), "-i", instance.project]
+        assert call.args[0][:4] == ["docker", "exec", "-i", instance.project]
     assert calls[1].args[0][-1] == "./scripts/setup"
     implementation = calls[2]
     script = Path(__file__).resolve().parents[1] / "src/software_factory/sandbox_agent.py"
     assert script.is_file(), "Pi wrapper must be a standalone Python script"
-    assert implementation.args[0][6:] == ["/usr/local/bin/python", "-I", "-c", script.read_text()]
+    assert implementation.args[0][4:] == ["/usr/local/bin/python", "-I", "-c", script.read_text()]
     assert "private-bearer" not in " ".join(implementation.args[0])
     payload = json.loads(implementation.kwargs["input"])
     assert payload["snapshot"]["title"] == "$(touch /host)"
@@ -191,12 +211,13 @@ def test_cleanup_failure_does_not_claim_success_or_broaden_scope(sandbox, monkey
     assert not hasattr(instance, "restore_ownership")
 
 
-def test_user_configuration_failure_never_falls_back_to_root(sandbox) -> None:
+def test_exec_identity_or_socket_failure_never_falls_back_to_root(sandbox) -> None:
     instance, commands = sandbox
-    commands.run.side_effect = ["", FactoryError("agent user configuration failed")]
-    with pytest.raises(FactoryError, match="user configuration"):
+    commands.run.side_effect = ["", FactoryError("agent identity and Docker access failed")]
+    with pytest.raises(FactoryError, match="identity and Docker access"):
         instance.start()
     assert len(commands.run.call_args_list) == 2
+    assert all("--user" not in call.args[0] for call in commands.run.call_args_list)
 
 
 @pytest.mark.parametrize(

@@ -56,9 +56,14 @@ def implement(instance):
     return bearer
 
 
-def test_host_user_has_writable_home_caches_socket_and_explicit_root(sandbox) -> None:
-    assert execute(sandbox, "id", "-u").strip() == str(os.getuid())
-    assert execute(sandbox, "id", "-g").strip() == str(os.getgid())
+def test_fixed_factory_has_writable_home_caches_socket_and_explicit_root(sandbox) -> None:
+    assert execute(sandbox, "id", "-u").strip() == "2000"
+    assert execute(sandbox, "id", "-g").strip() == "2000"
+    socket_gid = Path(sandbox.socket_path).stat().st_gid
+    assert socket_gid != 2000, "acceptance must exercise supplementary rather than primary socket access"
+    assert str(socket_gid) in execute(sandbox, "id", "-G").split()
+    assert execute(sandbox, "id", "-un").strip() == "factory"
+    assert sandbox.base == ["docker", "exec", "-i", sandbox.project]
     execute(sandbox, "sh", "-ec", 'mkdir -p "$XDG_CACHE_HOME"; touch "$HOME/home-write" "$XDG_CACHE_HOME/cache-write"')
     assert execute(sandbox, "sudo", "-n", "id", "-u").strip() == "0"
     execute(sandbox, "sudo", "-n", "sh", "-ec", 'test "$HOME" = "$(getent passwd 0 | cut -d: -f6)"')
@@ -94,7 +99,8 @@ def test_real_build_compose_socket_same_path_setup_pi_service_verify_and_host_ac
     instance.verify()
     assert (instance.workspace / "service-response").read_text() == "implemented\n"
     inspected = json.loads(subprocess.check_output(["docker", "inspect", instance.project], text=True))[0]
-    assert inspected["Config"]["User"] == f"{os.getuid()}:{os.getgid()}"
+    assert inspected["Config"]["User"] == "factory:factory"
+    assert inspected["HostConfig"]["GroupAdd"] == [str(Path(instance.socket_path).stat().st_gid)]
     assert {mount["Source"] for mount in inspected["Mounts"] if mount["Type"] == "bind"} == {
         str(instance.workspace),
         instance.socket_path,
@@ -112,15 +118,65 @@ def test_real_build_compose_socket_same_path_setup_pi_service_verify_and_host_ac
     assert bearer not in (instance.directory / "run.log").read_text()
 
 
-def test_root_user_configuration_does_not_import_workspace_python_modules(sandbox) -> None:
+def test_agent_start_does_not_mutate_baked_accounts(sandbox) -> None:
+    baseline = Commands().run(
+        [
+            "docker",
+            "run",
+            "--rm",
+            "--pull=never",
+            "--platform",
+            "linux/arm64",
+            "--entrypoint",
+            "sudo",
+            sandbox.image_id,
+            "-n",
+            "sha256sum",
+            "/etc/passwd",
+            "/etc/group",
+            "/etc/shadow",
+            "/etc/gshadow",
+        ],
+        "baked account checksums",
+        env=sandbox.env,
+    )
+    assert (
+        execute(sandbox, "sudo", "-n", "sha256sum", "/etc/passwd", "/etc/group", "/etc/shadow", "/etc/gshadow")
+        == baseline
+    )
+
+
+@pytest.mark.parametrize("failure", ["missing-group", "wrong-uid", "wrong-gid", "engine-access"])
+def test_exec_identity_and_socket_failure_blocks_setup_without_fallback(sandbox, failure) -> None:
     sandbox.stop()
-    (sandbox.workspace / "uuid.py").write_text("raise RuntimeError('untrusted workspace import')\n")
-    instance = Sandbox(sandbox.image_id, sandbox.env["DOCKER_HOST"], sandbox.directory, Commands())
+    assert Path(sandbox.socket_path).stat().st_gid != 2000
+
+    class BrokenAccess(Commands):
+        def run(self, args, phase, **kwargs):
+            args = list(args)
+            if phase == "agent startup":
+                if failure == "missing-group":
+                    index = args.index("--group-add")
+                    del args[index : index + 2]
+                elif failure == "engine-access":
+                    index = args.index("DOCKER_HOST=unix:///var/run/docker.sock")
+                    args[index] = "DOCKER_HOST=unix:///missing.sock"
+            elif phase == "agent identity and Docker access" and failure.startswith("wrong-"):
+                args[2:2] = ["--user", "0:0" if failure == "wrong-uid" else "2000:0"]
+            return super().run(args, phase, **kwargs)
+
+    commands = BrokenAccess(time.monotonic() + 30, sandbox.directory / "access-failure.log")
+    instance = Sandbox(sandbox.image_id, sandbox.env["DOCKER_HOST"], sandbox.directory, commands)
     try:
-        instance.start()
-        assert execute(instance, "id", "-u").strip() == str(os.getuid())
+        with pytest.raises(FactoryError, match="agent identity and Docker access"):
+            instance.start()
+        log = commands.log.read_text()
+        assert "[setup]" not in log and "[implementation]" not in log
+        assert log.count("[agent startup]") == 1
+        assert log.count("[agent identity and Docker access]") == 1
     finally:
         instance.stop()
+    assert not instance.owned(Commands(), "container")
 
 
 def test_cleanup_preserves_file_modes_ownership_symlinks_and_git_diff(sandbox) -> None:

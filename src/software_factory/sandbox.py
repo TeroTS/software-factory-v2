@@ -2,7 +2,7 @@
 import json
 import os
 import re
-import sys
+import stat
 import time
 import uuid
 from pathlib import Path
@@ -18,27 +18,6 @@ PI_FLAGS = [
     "--no-approve",
 ]
 RUN_LABEL = "software-factory.run-id"
-
-
-# Initialize the container's numeric run user and socket groups with fixed root code, before any target command.
-def configure_user(name: str, commands: Commands, env: dict[str, str]) -> None:
-    commands.run(
-        [
-            "docker",
-            "exec",
-            "--user",
-            "0:0",
-            name,
-            "/usr/local/bin/python",
-            "-I",
-            "-c",
-            Path(__file__).with_name("sandbox_user_setup.py").read_text(),
-            str(os.getuid()),
-            str(os.getgid()),
-        ],
-        "agent user configuration",
-        env=env,
-    )
 
 
 # Validate bearer metadata without exposing it; accept supported Copilot endpoints with ≥20-minute lifetime.
@@ -62,7 +41,7 @@ class VerificationFailed(FactoryError):
         self.output = output
 
 
-# Own one host-user agent and exact resource identity; Docker access/elevation are not a host-security boundary.
+# Own one fixed-identity agent and exact resource identity; Docker access/elevation are not a host-security boundary.
 class Sandbox:
     # Keep cleanup identity and engine selection on the host, outside the ordinary same-path workspace mount.
     def __init__(self, image_id: str, docker_host: str, directory: Path, commands: Commands) -> None:
@@ -74,13 +53,18 @@ class Sandbox:
         keys = {"PATH", "HOME", "USER", "TMPDIR", "DOCKER_CONFIG"}
         self.env = {key: value for key, value in os.environ.items() if key in keys}
         self.env["DOCKER_HOST"] = docker_host
-        # Desktop's host socket is a proxy, not a bindable path in the Linux daemon's filesystem.
-        self.socket_path = "/var/run/docker.sock" if sys.platform == "darwin" else docker_host[7:]
-        # UID-only exec resolves primary and supplementary socket groups from the configured container account.
-        self.base = ["docker", "exec", "--user", str(os.getuid()), "-i", self.project]
+        self.socket_path = docker_host[7:]
+        # No exec user override: retain the image identity and creation-time supplementary socket group.
+        self.base = ["docker", "exec", "-i", self.project]
 
-    # Start as the host UID/GID, then configure container-only home/account/socket access with fixed trusted code.
+    # Start with the baked factory account and selected socket group; validate actual exec access before target setup.
     def start(self) -> None:
+        try:
+            socket = Path(self.socket_path).stat()
+        except OSError:
+            raise FactoryError("selected Docker socket is unavailable; inspect the local engine endpoint") from None
+        if not stat.S_ISSOCK(socket.st_mode):
+            raise FactoryError("selected Docker socket path is not a Unix socket")
         self.commands.run(
             [
                 "docker",
@@ -91,8 +75,8 @@ class Sandbox:
                 "--pull=never",
                 "--platform",
                 "linux/arm64",
-                "--user",
-                f"{os.getuid()}:{os.getgid()}",
+                "--group-add",
+                str(socket.st_gid),
                 "--init",
                 "--label",
                 f"{RUN_LABEL}={self.project}",
@@ -127,7 +111,19 @@ class Sandbox:
             cwd=self.directory,
             env=self.env,
         )
-        configure_user(self.project, self.commands, self.env)
+        self.commands.run(
+            self.base
+            + [
+                "sh",
+                "-ec",
+                'test "$(id -u)" = 2000; test "$(id -g)" = 2000; '
+                f'case " $(id -G) " in *" {socket.st_gid} "*) ;; *) exit 1;; esac; '
+                "docker info >/dev/null",
+            ],
+            "agent identity and Docker access",
+            cwd=self.directory,
+            env=self.env,
+        )
 
     # Require both canonical executable entrypoints before setup; do not invent commands or repair setup failures.
     def setup(self) -> None:

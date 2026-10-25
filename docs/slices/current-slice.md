@@ -3,95 +3,90 @@
 Status: done
 
 ## Slice Goal
-- Let the operator start the runner under the fixed factory account and observe validated polling.
+- Let the operator obtain a verified draft PR using the baked factory account and supplementary Docker socket access, without runtime account initialization.
 
 ## Slice Boundary
 - Actor: Operator.
-- Trigger: A provisioned host has manual authentication, existing operator configuration, and an explicitly built updated shared agent image.
-- Action: Start the runner under the factory account through the existing CLI/preflight path.
-- Visible outcome: The runner validates the fixed host/image identity and enters polling.
-- Authoritative state transition: Stopped configured runner → validated fixed-identity runner polling the repository.
-- Include startup validation, failure diagnostics, cleanup, and interruption; do not process an issue or redesign configuration.
+- Trigger: The fixed-identity runner is polling and an issue is labeled for implementation.
+- Action: Submit the issue through the existing first-pass workflow.
+- Visible outcome: The issue links to a verified draft PR produced using the fixed agent account and Docker socket access, without runtime account mutation.
+- Authoritative state transition: Labeled issue on a validated fixed-identity runner → successful issue run linked to a draft PR after required cleanup.
+- One migration regression E2E with real local Git/Docker services and scripted Pi/GitHub boundaries; no new coordination, repair, or publication behavior.
 
 ## Stories In Scope
-- `US-09 Start the runner with the fixed factory identity`
+- `US-10 Execute issue runs without runtime account initialization`
 
 ## Stories Completed In This Slice
-- `US-09 Start the runner with the fixed factory identity`
+- `US-10 Execute issue runs without runtime account initialization`
 
 ## Stories Remaining In This Slice
 - None.
 
 ## Contract Inputs
-- `docs/contracts.md`, Contract 1: unchanged CLI/four-field TOML, supported host/effective identity, artifact/authentication checks, immutable local image, fail-closed startup, cleanup, and exit semantics.
-- `docs/contracts.md`, Contract 3: Debian-based native image, build-time factory identity/home/caches/npm prefix/account-scoped sudo, no runtime account mutation in the startup probe, and explicit rebuild/restart guidance.
-- `docs/contracts.md`, Contract 9: already-provisioned Ubuntu 24.04 ARM64 Lima host; provisioning, authentication, and image builds remain explicit operator actions.
+- `docs/contracts.md`, Contract 3: baked factory identity/home/caches, selected socket numeric GID, `--group-add`, actual exec identity/socket validation before setup, stdin-only ephemeral credentials, and no runtime account mutation or root fallback.
+- `docs/contracts.md`, Contracts 1–2 and 4–7: unchanged CLI/TOML, claims/snapshot, first-pass ordering/original deadline, trusted create-only publication, private diagnostics, and scoped cleanup/access gates.
+- `docs/contracts.md`, Contracts 8–9: native Linux storage/services, explicit macOS-to-VM fixture access, existing provisioned Lima environment, and operator authorization for environment changes.
 - No factory-owned HTTP API or `openapi.yaml` applies.
 
 ## Decision Inputs
-- `DECISIONS.md`, Operations / Deployment and Operational / Deployment Constraints: fixed factory 2000:2000 deployment, baked image identity, local-Lima-only acceptance, ARM64 CI under the fixed identity, and explicit authorization for environment preparation.
+- `DECISIONS.md`, Operations / Deployment and Operational / Deployment Constraints: fixed identity, selected socket GID via `--group-add`, feasibility through actual exec, local-Lima acceptance, removal audit, and explicit environment authorization.
+- SPEC/contracts govern first-pass execution; historical repair provisions in DECISIONS.md are not work in this slice.
 
 ## Shared State Required Now
-- Existing provisioned local Lima Ubuntu 24.04 ARM64 host with factory UID/GID 2000:2000 and Docker access; no new account/configuration/artifact migration.
-- Fixed image account/group factory 2000:2000, writable container-local `/tmp/factory-home`, XDG caches, npm user-local prefix/bin PATH, and factory-only passwordless sudo with root HOME selection.
-- Existing four-field operator configuration, session-resolved immutable image ID, selected local Unix socket endpoint, and unique startup-probe cleanup identity.
-- Existing retained diagnostics and workspace permissions remain unchanged.
-- No issue-run state, socket-group mechanism, new configuration fields, or recovery state is added in this slice.
+- Existing provisioned Ubuntu 24.04 ARM64 Lima guest and factory UID/GID 2000:2000; existing explicitly built compatible shared image resolved to its immutable ID.
+- Selected local Unix socket path and its actual numeric GID; no new configuration fields or account/group mutations.
+- Existing fresh workspace, run identity/ownership labels, original 900-second deadline, private logs, and trusted publication metadata.
+- Previous artifacts, unrelated resources, images, and build cache remain unchanged.
 
 ## Operations / Endpoints / Surfaces In This Slice
-- `src/software_factory/runner.py`: reject unsupported OS/architecture and effective UID/GID before artifact/probe/issue activity; validate image identity/home/tools/sudo without calling runtime user initialization; preserve existing preflight cleanup and polling behavior.
-- `agent/Dockerfile`: bake the fixed account/group/home/caches/npm prefix and account-scoped sudo; select the factory execution identity while preserving Debian and existing base/tool pins.
-- `.github/workflows/verify.yml`: execute verification under factory 2000:2000 with Docker access, not the hosted runner's default identity.
-- `tests/test_startup.py`, `tests/test_startup_docker.py`, affected CLI/toolchain tests and fixtures: identity rejection, image incompatibility, actual image execution, real CLI polling, and preserved failure/cleanup/interruption behavior.
-- `sandbox_user_setup.py` now tolerates the already-baked home (`exist_ok=True`) and preserves its contents, keeping existing issue execution runnable until US-10 removes this initializer. No socket-group mechanism, alternate backend, or workspace repair was introduced.
-- Retired the three-case real-Docker arbitrary-ID/sudo test because arbitrary identities and general image sudo are no longer supported. Added actual factory-only sudo/identity checks instead; retained other existing execution/failure regressions and initializer unit tests until US-10.
-- Updated README, agent instructions, and standing guidance for the supported host, image identity, and explicit rebuild/restart. CLI/TOML, tool/base pins, and provisioning are unchanged.
-- Working tree was clean at planning start. The operator authorized fresh test checkouts, declared development dependency installation, and an explicit updated image build in the existing Lima VM; no live authentication/service access was used.
+- `src/software_factory/sandbox.py`: removed `configure_user`, host-identity exec overrides, and obsolete macOS socket translation. It discovers the selected Unix socket's actual GID, passes `--group-add` at creation, and validates actual exec UID/GID, socket membership, and engine access before setup. Missing/inaccessible/non-socket paths fail safely before container creation.
+- Deleted `src/software_factory/sandbox_user_setup.py` and `tests/test_sandbox_user_setup.py` after replacement behavior was proven. No initializer caller, root setup exec, runtime account mutation, arbitrary-ID path, or macOS socket translation remains in production.
+- `tests/test_sandbox.py`: replace initializer/host-user expectations with fixed identity, socket discovery, supplementary-group creation, and fail-closed exec access tests.
+- `tests/test_docker_integration.py`: prove actual exec supplementary groups, writable baked home/caches, explicit sudo, socket access, and unchanged lifecycle/failure/cleanup behavior; retire initializer-only fixtures.
+- `tests/test_issue_docker.py` and `tests/tests_support.py`: demonstrate labeled issue → verified draft PR through the new identity/group path using real Git/Docker and scripted service boundaries, including required service/tool/ownership evidence.
+- Existing runner failure tests additionally assert that failed startup blocks setup, Pi, and commit. README and agent instructions document the fixed exec/group path. CLI/TOML, runner ordering, image/tool pins, CI, credential delivery, cleanup/publication logic, and coverage configuration are unchanged.
+- Working tree was clean at planning start. US-09 completion/evidence remains in git history; its note reported 99.35% Python overall line/branch coverage and a compatible existing shared image.
 
 ## Tests Required
-- Test-first host rejection: macOS/unsupported Linux release/architecture, root, wrong effective UID, and wrong effective GID; reject before commands, artifact changes, or issue claims. Valid identity continues through existing preflight checks.
-- Image checks: actual factory account/group 2000:2000, selected ordinary identity, writable home/caches/npm prefix, required native tools, explicit sudo with root HOME, and rejection of old/wrong-identity/unwritable-home/broken-sudo images with rebuild/restart guidance.
-- Preserve regressions for engine/image architecture and immutable ID, configuration/authentication, artifact preservation/access, partial probe startup, runtime failure, cleanup failure, and SIGTERM/interruption.
-- Explicit story E2E: in the local Lima VM, run the real CLI as factory against the updated real local image with scripted authentication/GitHub boundaries; observe idle polling, no issue claims, probe cleanup, preserved prior diagnostics, and exit 130 on SIGTERM.
-- Run Ruff format check → Ruff lint → tests/coverage, retaining the Python overall line/branch 80% gate. Investigate/report any coverage decrease from the previous recorded 99.34% baseline.
-- Run existing real Docker/image regressions under the fixed account after an explicitly authorized image build; distinguish unchanged execution regression evidence from US-10 acceptance.
-- Check affected documentation links/formatting and CI fixed-identity command behavior. No standalone type checker or Markdown linter is configured.
+- First prove feasibility in the existing Lima guest: start the existing native shared image as its default factory identity with the selected socket GID via `--group-add`; use the intended actual exec form to assert UID/GID 2000:2000, supplementary membership with socket GID different from 2000, and successful `docker info`. No account edits, socket chmod, root retry, or fallback. If it fails, stop and return evidence to the operator.
+- Test-first unit failures for missing/unusable socket discovery, wrong exec identity, lost supplementary membership, and denied engine access; setup/Pi must not run after failed validation. Preserve bounded cleanup after partial creation.
+- Real Docker regressions: same-path sibling mounts, native defaults/unmodified Docker CLI, target-installed npm tool, explicit sudo/root HOME, service-backed verification, disposable service volumes, compatible workspace ownership, and unchanged inaccessible required files blocking publication.
+- Explicit story E2E: operator labels the scripted issue and observes a verified draft PR through the real CLI, local Git remote, and real Docker services using the new fixed-identity/group path. Assert cleanup precedes publication, trigger consumption, draft payload/content, and previous diagnostic preservation.
+- Preserve setup/verification/provider/credential/deadline/SIGTERM/partial-start/cleanup/access/uncertain-publication regressions and unrelated sentinel resources.
+- Demonstrate a macOS browser reaching a fixture service through the already-configured Lima loopback port 8080 path, with explicit operator authorization to occupy that port; do not change forwarding or broaden exposure.
+- Run Ruff format check → Ruff lint → tests/coverage on the development host and the real Docker/image suite as factory in Lima. Retain the 80% coverage gate; investigate/report changes from the recorded 99.35% baseline.
+- Audit obsolete initializer callers/fixtures and parallel paths; check affected documentation links/formatting and `git diff --check`. No standalone type checker or Markdown linter is configured.
 
 ### Verification Evidence
-- Test-first failures proved missing host/effective-identity rejection, startup's old root initialization/UID override, missing rebuild/restart guidance, absent baked image identity, and failure on an existing image home before implementation. The initial focused set then passed all 75 tests.
-- Built `software-factory-agent:1.0.0` explicitly in the authorized local Lima guest; final immutable image ID is `sha256:9d2153ce3e03956cf00703c5a53afa64b9f27b7c96c0a67e89fe60e5e5f24049`. Base/tool versions and Debian snapshot pins are unchanged.
-- Initial image build failed PyPI certificate verification with Zscaler enabled. After the operator disabled Zscaler and requested a retry, the build passed with TLS verification enabled. No CA, trust-root, credential, source, or verification-bypass change was made.
-- The first built image's real tests caught root ownership of npm's intermediate `.local` directory. Explicitly creating that directory as factory fixed it; a rebuild passed. Real negative-image tests also caught a missing npm-bin writability check and shell `set -e` suppression in chained directory tests. After reproducing both failures, separate fail-closed checks reject missing/nonwritable cache/prefix/bin directories.
-- The 23 real startup/image checks pass, including actual factory UID/GID/name, baked directories and native tools, root HOME under sudo, denied sudo for another account, wrong/root image identity, missing account, broken tools/sudo, and incompatible home/cache/prefix/bin with cleanup. The real CLI observes idle polling using scripted authentication/GitHub boundaries, preserves previous diagnostics, claims no issues, and exits 130 on SIGTERM. Final engine inspection found no `factory-startup-*` leftovers.
-- `FACTORY_DOCKER_TESTS=1 FACTORY_AGENT_IMAGE_TESTS=1 ./scripts/verify` inside the Lima guest as factory 2000:2000 passed format → lint → tests/coverage: **361 passed, 3 skipped**, Python overall line/branch **99.35%**, above the prior **99.34%** baseline and unchanged **80%** gate. Skips are macOS/Lima-on-host-only checks and the separately authorized provisioning test; no provisioning was rerun.
-- Existing real Docker execution and four issue-CLI outcomes passed under the new image: ordinary builds/Compose services, target-installed tool, socket/sibling mounts, host file access, scoped cleanup/sentinels, setup/verification/deadline failures, inaccessible output, interruption, and create-only local-Git/scripted-PR publication. These still use the old per-run initializer and do not establish US-10 supplementary-group acceptance.
-- macOS `./scripts/verify` passed format → lint → tests/coverage: **320 passed, 44 skipped**, **99.35%** coverage. Skips are opt-in Docker/image/provisioning tests; the real Docker/image tests ran in Lima instead. CLI `--help` passed without polling.
-- `git diff --check`, Markdown whitespace/fences, **24 local links/anchors**, and `bash -n` on both CI shell blocks passed. CI now stages a fresh factory-owned checkout, grants Docker membership but no host sudo, and runs setup/build/verification through explicit factory identity with both Docker opt-ins passed across sudo's environment boundary. Hosted GitHub Actions itself was not run; no commit/push was authorized.
-- Test staging initially carried macOS AppleDouble metadata, causing Ruff to reject synthetic `._*.py` files in the guest. A fresh stage transferred with xattrs disabled fixed the harness; repository code/check configuration was not changed to ignore those files. Final native checkout: `/home/factory/us09.lJzOOBOJ`. Earlier stage `/home/factory/us09.ttM6PdUv` and private logs in host `artifacts/us09.ZSUoU7/` remain for operator inspection; no previous artifacts or shared image/cache resources were deleted.
-
-### Review Follow-up Verification
-- Reproduced both review findings against the real shared image before fixing them: all ten broken-tool cases failed an added invocation-marker assertion because the PATH guard short-circuited execution; unsearchable cache/bin directories incorrectly passed startup. Unsearchable home/prefix were already rejected indirectly.
-- Broken-tool fixtures now install their executable into the existing npm bin directory without changing PATH, and assert its invocation marker in private command output. Startup explicitly requires search permission on home/cache/npm prefix/bin, with four real-image negative cases. The focused startup/image suite passes all **27** tests.
-- `./scripts/verify` on macOS passes format → lint → tests/coverage: **320 passed, 48 skipped**. `FACTORY_DOCKER_TESTS=1 FACTORY_AGENT_IMAGE_TESTS=1 ./scripts/verify` in the existing Lima guest as factory 2000:2000 passes **365 tests, 3 skipped**. Both retain **99.35%** coverage and the unchanged 80% gate. Guest skips remain the two host-only checks and explicitly authorized provisioning test.
-- Used the existing immutable shared image without rebuilding or provisioning; no live service authentication, hosted CI, commit, or push was performed. Fresh test checkout `/home/factory/us09-review.R4U56VtU` remains for inspection; earlier diagnostics/checkouts are unchanged.
+- The operator approved the planned environment use with “proceed”. A scoped feasibility container in the existing Lima guest used immutable image `sha256:9d2153ce3e03956cf00703c5a53afa64b9f27b7c96c0a67e89fe60e5e5f24049`, discovered socket GID **988**, and `--group-add 988` without any user override or initialization. Actual `docker exec -i <name>` reported UID/GID **2000:2000**, supplementary group **988**, and successful native `linux/aarch64` engine access. The probe container was removed. The accepted mechanism is feasible; no fallback is needed.
+- Test-first unit checks failed on the old user overrides and absent socket validation; real Docker checks failed on changed account files, missing supplementary membership, old image-user overrides, and absent fail-closed exec validation. The replacement's focused unit suite passes all **30** tests. The initial real execution/issue suite passed all **24** tests after implementation.
+- Real negative checks remove `--group-add`, override exec UID/GID, or point the in-container client at an unavailable engine. Each fails the access check without setup, implementation, or a second start/validation attempt, and scoped cleanup removes the partial agent. A checksum comparison with a pristine container confirms `/etc/passwd`, `/etc/group`, `/etc/shadow`, and `/etc/gshadow` remain unchanged.
+- Expanded the ordinary target fixture to assert fixed identity during setup/Pi/verification, explicit sudo with root HOME, target-installed npm tooling, private root-owned mode-0600 service data in a disposable volume, and service-written workspace output owned by 2000:2000. The real CLI publishes that service-written file alongside the verified implementation to a local Git remote and scripted draft PR; no real GitHub write or Copilot call occurs.
+- The expanded fixture initially failed only the fresh-checkout CLI cases: its empty output directory was not tracked by Git, so Docker created a root-owned bind directory. Creating the directory as factory in target setup fixes the fixture without permission repair; all **four** real CLI success/interruption/inaccessible-file/inaccessible-directory outcomes then passed.
+- macOS `agent-browser --session us10 open http://127.0.0.1:8080/` and `get text body` observed **implemented** from a fixture that completed setup → scripted Pi → real service verification through the new agent path. It used only the existing Lima loopback forwarding; no network configuration changed. Screenshot: `artifacts/us10/browser.png`. Browser session and owned containers/network/volume were removed; a subsequent connection to port 8080 failed as expected. The fixture image/cache and diagnostic directory remain, not active services.
+- macOS `./scripts/verify` passes format → lint → tests/coverage: **310 passed, 52 skipped**, Python overall line/branch **99.33%**. Opt-in Docker/image/provisioning checks are skipped on macOS; the Docker/image checks ran in Lima instead.
+- `FACTORY_DOCKER_TESTS=1 FACTORY_AGENT_IMAGE_TESTS=1 ./scripts/verify` in the existing Lima guest as factory 2000:2000 passes format → lint → tests/coverage: **359 passed, 3 skipped**, **99.33%** coverage. Guest skips are Lima-on-macOS configuration validation, direct macOS rejection, and separately authorized provisioning. Existing startup/image and execution/failure/cleanup/sentinel regressions pass. No image rebuild or reprovisioning was needed.
+- Investigated the coverage decrease from **99.35%** to **99.33%**: deleting the fully covered initializer shrinks the measured code denominator. All new socket validation lines/branches are covered; the remaining two missed statements and five partial branches are in unchanged CLI/runner/cleanup paths. Coverage policy/exclusions and the **80%** gate are unchanged.
+- The ad-hoc browser script initially appeared in guest Ruff discovery because the tar-staged checkout lacked Git metadata. Initializing that fresh checkout as a Git repository restored normal `.gitignore` handling of `artifacts/`; no lint exclusions or production code were changed. Final verification then passed in the ordinary checkout shape.
+- Final `git diff --check`, Markdown whitespace/fences, **16 local links/anchors**, slice lifecycle/removal audit, and CLI `--help` pass. Final engine inspection found no remaining containers or factory-named networks/volumes. No standalone type checker or Markdown linter is configured.
+- Fresh factory-owned test checkout: `/home/factory/us10.dJtYEpnF`. Local private evidence is under `artifacts/us10/`; guest browser logs/workspace are under that checkout's ignored `artifacts/`. Previous checkouts and diagnostics remain unchanged. No live authenticated access, hosted CI run, trust-root changes, VM provisioning, commit, or push was performed.
 
 ## Not Now
-- US-10 issue-run initialization removal, socket GID discovery/`--group-add`, actual exec supplementary-group feasibility, issue-to-draft-PR migration acceptance, and macOS browser-to-VM fixture-service evidence.
-- Verification repairs, full manual-requeue acceptance, new coordination/publication behavior, or changes to the original deadline.
-- Arbitrary host identities, direct macOS runner support, parallel backends, automatic migration, workspace permission repair, automatic image builds/pulls, or general host passwordless sudo.
-- Reprovisioning/allocating the VM, changing trust roots, new network exposure, cloud resources, or live authenticated Copilot/GitHub access.
-- Changes to VM allocation, host provisioning, credentials, trust roots, or network settings remain unauthorized; use only the existing guest and the explicitly authorized test checkout/dependencies/image build.
+- No additional explicit migration story follows US-10. Do not invent a story after it.
+- Verification repairs, full manual-requeue acceptance, new coordination/publication behavior, or deadline changes.
+- Arbitrary host identities, direct macOS runner support, account-mutation/root fallbacks, workspace permission repair, automatic image build/pull, or configuration migration.
+- VM allocation/reprovisioning, tool/trust-root upgrades, changed forwarding/new network exposure, cloud resources, live authenticated Copilot/GitHub access, commit, or push.
+- The operator authorized a fresh factory-owned test checkout, declared dependencies, scoped Docker fixtures/cleanup, and temporary use of the existing localhost:8080 forwarding. Reuse the existing shared image; no rebuild, provisioning, forwarding changes, or live authenticated service access is authorized.
 
 ## Done When
-- The supported fixed-identity host and compatible baked image reach polling through the unchanged CLI/TOML path, demonstrated by the real local-Lima CLI E2E with scripted external-service boundaries.
-- Unsupported hosts/root/wrong IDs and incompatible images fail before claims with safe actionable diagnostics, without account switching, runtime startup account mutation, permission repair, or fallback.
-- Startup retains artifact/authentication checks, immutable native local image selection, bounded probe cleanup, polling, and interruption behavior; cleanup failure blocks startup.
-- ARM64 CI runs verification as factory 2000:2000, affected existing regressions pass, coverage meets the unchanged gate, and durable instructions match the supported startup behavior.
-- US-10's distinct issue-execution outcome remains deferred; no live-service acceptance is claimed.
+- The actual exec path preserves the baked factory UID/GID and discovered supplementary socket membership, including a differing socket GID, before target setup; missing access fails visibly without mutation/elevation/fallback.
+- No runtime account/shadow/group initialization or obsolete caller/compatibility path remains.
+- The real local-Lima CLI E2E produces the existing verified draft-PR outcome, and required local service/browser/ownership and failure regressions pass without weakening cleanup, publication, credential, deadline, or coverage safeguards.
+- Durable instructions match the single execution path, and evidence distinguishes scripted boundaries from live authenticated services.
 
 ## Completion Summary
-- The operator can start the unchanged CLI/TOML on the provisioned host as factory 2000:2000 and reach polling after validating the baked image's actual identity, writable directories, native tools, and explicit sudo. Startup no longer configures accounts or overrides the image user; unsupported hosts/identities and incompatible images fail before claims with rebuild/restart guidance.
-- Required startup cleanup, artifact preservation, interruption, existing issue-execution regressions, and the unchanged coverage gate pass in the local Lima acceptance environment. No live provider/GitHub access, CA changes, provisioning, commit, or push was performed.
+- An operator's labeled issue reaches the existing verified draft-PR outcome using the baked factory 2000:2000 account and creation-time supplementary socket membership, without runtime account initialization or exec user overrides. Access is checked before target setup; failure remains terminal with scoped cleanup and no root fallback.
+- Local-Lima real Git/Docker CLI acceptance, explicit sudo/tool/service-volume/workspace-ownership evidence, macOS browser access through existing forwarding, and preserved failure/publication safeguards pass. Durable instructions describe the single path; coverage stays above the unchanged gate.
 
 ## Next Slice Recommendation
-- `US-10 Execute issue runs without runtime account initialization`: remove the remaining per-run initializer/callers/obsolete fixtures and prove socket GID discovery plus `--group-add` through actual exec before relying on it. Preserve existing first-pass issue-to-draft-PR behavior, and add the distinct migration E2E and macOS-browser-to-VM-service evidence. Return to the operator if the accepted supplementary-group mechanism fails; do not add a root/account-mutation fallback. No other explicit migration story follows US-10.
+- No explicit next story remains in `SPEC.md`; US-08, US-09, and US-10 migration outcomes are complete. Stop implementation unless the operator requests additional work.
