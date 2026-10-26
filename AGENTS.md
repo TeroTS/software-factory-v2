@@ -2,7 +2,8 @@
 
 ## Start of work
 
-- Read [README.md](README.md) for setup and operator guidance.
+- Read [README.md](README.md) for commands; consult [operator guidance](docs/operations.md)
+  and the [image reference](docs/agent-image.md) when changing those areas.
 - Read [SPEC.md](SPEC.md) and [docs/contracts.md](docs/contracts.md) for affected
   behavior/interfaces, and [CONTEXT.md](CONTEXT.md) before naming domain concepts.
 - For execution-model changes, read [DECISIONS.md](DECISIONS.md) and
@@ -37,44 +38,19 @@ GitHub holds durable coordination; no database, HTTP API, or hosted deployment e
 
 ## Development workflow
 
-From the repository root, use Python **3.14.3**, uv **0.5.13**, Make, a POSIX shell,
-and Git. Node.js remains in the shared image for Pi/target tooling, not host
-verification. Dependencies are locked in `uv.lock`; Hatchling is pinned in
-`pyproject.toml`. Setup installs the package editable.
-
-```sh
-./scripts/setup
-./scripts/verify
-uv run --frozen python -m software_factory --help
-uv run --frozen pytest tests/test_toolchain.py -q
-```
-
-- `make format` mutates formatting; `make format-check` and `make lint` do not.
-- `make test` runs pytest; `make coverage` runs Python coverage, including the Pi bridge.
-- Verification order: Ruff format check → Ruff lint → tests/coverage.
-- Python overall line/branch coverage, including the Pi bridge, must meet its
-  **80%** gate. Never lower thresholds or exclude business logic.
-- No standalone type checker or Markdown linter is configured. Packaging uses the
-  pinned backend; there is no release workflow.
-
-CI-equivalent Docker/CLI checks run inside the provisioned Ubuntu 24.04 ARM64
-Lima guest as factory 2000:2000, with local Docker/Compose and an explicitly built
-shared image. CI stages a fresh factory-owned checkout and verifies as that same
-identity without granting the account host sudo. Unit checks can run on a
-development host. Target fixtures build ordinary application images,
-install a local npm tool inside the agent, and verify against real Compose services.
-
-```sh
-docker build --platform linux/arm64 -t software-factory-agent:1.0.0 agent
-FACTORY_DOCKER_TESTS=1 FACTORY_AGENT_IMAGE_TESTS=1 ./scripts/verify
-```
-
-Add meaningful tests for behavior changes, including relevant failure cases.
-Keep real Git/process and Docker boundary checks where applicable. Pure logic
-uses pytest and existing fixtures/patterns. Distinguish scripted external boundaries
-from tests against real services. Do not run live checks implicitly:
-Copilot probes consume authenticated service access. Live checks require explicit
-approval. See [README live checks](README.md#verification-beyond-unit-tests).
+- Follow [README development commands](README.md#development); run `./scripts/verify`
+  in order: Ruff format check → lint → tests/coverage. `make format` mutates files.
+- Use the locked dependencies and pinned toolchain/backend; host verification needs no Node.js.
+- Maintain the **80%** overall line/branch coverage gate, including the Pi bridge.
+  Never lower thresholds or exclude business logic.
+- Add meaningful tests for behavior changes and relevant failures. Use existing pytest
+  patterns; retain real Git/process and Docker boundary checks where applicable.
+- Unit checks may run on a development host. Docker/CLI checks require the provisioned
+  Ubuntu 24.04 ARM64 guest, factory 2000:2000, and an explicitly built shared image.
+  CI verifies as the same identity without host sudo.
+- Distinguish scripted boundaries from real services. Live authenticated checks
+  (including Copilot probes) and privileged provisioning tests require explicit
+  approval. See [extended verification](docs/operations.md#verification-beyond-unit-tests).
 
 ## Configuration and local requirements
 
