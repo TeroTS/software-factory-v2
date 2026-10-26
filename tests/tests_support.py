@@ -65,7 +65,16 @@ if '--list-models' in sys.argv:
 else:
     home = pathlib.Path(os.environ['PI_CODING_AGENT_DIR'])
     instructions = (home / 'AGENTS.md').read_bytes()
-    assert instructions == pathlib.Path('/opt/software-factory/pi/AGENTS.md').read_bytes()
+    expected = pathlib.Path('/opt/software-factory/pi/AGENTS.md').read_bytes()
+    paths = [pathlib.Path('/opt/software-factory/pi/skills') / name / 'SKILL.md'
+             for name in ('test-driven-development', 'ponytail')]
+    for path in paths:
+        expected += (f'\\n\\n# Required factory skill\\nSource: {path}\\nBase directory: {path.parent}\\n\\n'.encode()
+                     + path.read_bytes())
+    assert instructions == expected
+    assert [sys.argv[i+1] for i, arg in enumerate(sys.argv) if arg == '--skill'] == [str(path) for path in paths]
+    assert '--no-skills' in sys.argv
+    assert (paths[0].parent / 'testing-anti-patterns.md').read_text()
     assert b'Do not publish, commit, or push' in instructions
     assert '--no-context-files' not in sys.argv
     prompt = sys.stdin.read()

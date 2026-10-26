@@ -1,4 +1,5 @@
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -46,6 +47,32 @@ def test_image_bakes_factory_instructions_outside_the_workspace() -> None:
         "sibling services do not share your localhost",
     ):
         assert rule in instructions
+
+
+def test_image_bundles_only_reviewed_skills_and_licenses() -> None:
+    dockerfile = (ROOT / "agent/Dockerfile").read_text()
+    assert "COPY pi/skills /opt/software-factory/pi/skills" in dockerfile
+    skills = ROOT / "agent/pi/skills"
+    files = (
+        "test-driven-development/SKILL.md",
+        "test-driven-development/testing-anti-patterns.md",
+        "test-driven-development/LICENSE",
+        "ponytail/SKILL.md",
+        "ponytail/LICENSE",
+    )
+    assert sorted(str(p.relative_to(skills)) for p in skills.rglob("*") if p.is_file()) == sorted(files)
+    for name in ("test-driven-development", "ponytail"):
+        text = (skills / name / "SKILL.md").read_text()
+        assert re.match(rf"---\nname: {name}\ndescription: [^\n]+\nlicense: MIT\n---\n", text)
+        assert "MIT License" in (skills / name / "LICENSE").read_text()
+    tdd = (skills / "test-driven-development/SKILL.md").read_text()
+    assert "testing-anti-patterns.md" in tdd
+    assert "pre-existing or unrelated work" in tdd
+    assert "Ask your human partner" not in tdd
+    ponytail = (skills / "ponytail/SKILL.md").read_text()
+    assert "full" in ponytail
+    assert "target repository" in ponytail
+    assert "/ponytail" not in ponytail
 
 
 def test_coverage_policy() -> None:

@@ -23,6 +23,11 @@ LOGGER = logging.getLogger("software_factory")
 RUNTIME_CHECK = """set -eu
  test -f /opt/software-factory/pi/AGENTS.md
  grep -q '[^[:space:]]' /opt/software-factory/pi/AGENTS.md
+ for file in test-driven-development/SKILL.md test-driven-development/testing-anti-patterns.md \
+             test-driven-development/LICENSE ponytail/SKILL.md ponytail/LICENSE; do
+   test -f "/opt/software-factory/pi/skills/$file"
+   grep -q '[^[:space:]]' "/opt/software-factory/pi/skills/$file"
+ done
  test "$(id -u)" = 2000
  test "$(id -g)" = 2000
  test "$(id -un)" = factory

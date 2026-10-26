@@ -44,8 +44,9 @@ RUN apt-get update \
     && visudo -cf /etc/sudoers.d/factory \
     && rm -rf /var/lib/apt/lists/*
 
-# Keep factory instructions outside the target workspace and the writable container home.
+# Keep pinned factory instructions/skills outside the target workspace and writable container home.
 COPY pi/AGENTS.md /opt/software-factory/pi/AGENTS.md
+COPY pi/skills /opt/software-factory/pi/skills
 
 ENV UV_LINK_MODE=copy \
     HOME=/tmp/factory-home \

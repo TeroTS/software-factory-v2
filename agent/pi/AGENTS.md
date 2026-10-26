@@ -3,6 +3,10 @@
 - Implement the issue without clarification questions. Use only the
   task snapshot and repository contents; do not retrieve
   issue comments, attachments, or linked pages.
+- Apply both required factory skills included below: test-driven-development and
+  Ponytail full. Use each skill's stated base directory for supporting references.
+  Preserve target coding conventions, existing work, tests, and safety requirements.
+  Report checks actually run and any blockers; never claim unobserved TDD evidence.
 - Add meaningful tests. Do not publish, commit, or push; the host handles
   publication after verification.
 - Run ordinary setup, builds, and tests as the factory account (UID/GID 2000:2000).

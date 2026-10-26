@@ -1,4 +1,4 @@
-# Load image-owned instructions and stdin task/Copilot data; invoke exact-model Pi with private temporary context.
+# Load pinned image-owned instructions/skills and stdin task/Copilot data; invoke exact-model Pi privately.
 import json
 import os
 import subprocess
@@ -7,7 +7,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 
-# Separate context from task data; forward Pi status and fail safely on unavailable instructions or invocation errors.
+# Separate validated factory context from task data; forward Pi status and fail safely without leaking credentials.
 def main() -> int:
     payload = json.load(sys.stdin)
     try:
@@ -16,6 +16,27 @@ def main() -> int:
             raise ValueError
     except OSError, ValueError:
         print("factory Pi instructions unavailable; rebuild the shared image, then restart", file=sys.stderr)
+        return 1
+    skills = Path("/opt/software-factory/pi/skills")
+    try:
+        files = (
+            "test-driven-development/SKILL.md",
+            "test-driven-development/testing-anti-patterns.md",
+            "test-driven-development/LICENSE",
+            "ponytail/SKILL.md",
+            "ponytail/LICENSE",
+        )
+        contents = {file: (skills / file).read_text(encoding="utf-8") for file in files}
+        if any(not text.strip() for text in contents.values()):
+            raise ValueError
+        skill_paths = [skills / name / "SKILL.md" for name in ("test-driven-development", "ponytail")]
+        for path in skill_paths:
+            instructions += (
+                f"\n\n# Required factory skill\nSource: {path}\nBase directory: {path.parent}\n\n"
+                + contents[str(path.relative_to(skills))]
+            )
+    except OSError, ValueError:
+        print("factory Pi skills unavailable or incompatible; rebuild the shared image, then restart", file=sys.stderr)
         return 1
     try:
         with TemporaryDirectory(prefix="factory-pi-") as directory:
@@ -58,6 +79,7 @@ def main() -> int:
                     "pi",
                     *flags,
                     "--print",
+                    *[arg for path in skill_paths for arg in ("--skill", str(path))],
                     "--provider",
                     "github-copilot",
                     "--model",

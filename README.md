@@ -195,7 +195,11 @@ are not a distributed lock.
 
 ## Shared image and target preparation
 
-[agent/README.md](agent/README.md) documents pinned baseline tools and build checks.
+[agent/README.md](agent/README.md) documents pinned baseline tools, reviewed TDD and
+Ponytail full skills, provenance, and build checks. Both complete skills are loaded
+for implementation; discovered/configured skills remain disabled. Rebuild the
+shared image and restart after skill updates; missing or incompatible skill bundles
+block startup/invocation. Skill loading does not prove model adherence to TDD.
 Targets need executable, deterministic, noninteractive `./scripts/setup` and
 `./scripts/verify`; verification must align with target CI. Setup installs any
 nonbaseline tools/browser binaries **inside the agent**, not on the host. Both

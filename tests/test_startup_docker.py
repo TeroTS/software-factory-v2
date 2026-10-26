@@ -60,6 +60,13 @@ def test_shared_image_has_pinned_native_baseline_and_no_credentials() -> None:
     test ! -e /root/.config/gh/hosts.yml
     printf '\\nFACTORY_INSTRUCTIONS\\n'
     cat /opt/software-factory/pi/AGENTS.md
+    printf '\\nFACTORY_SKILLS\\n'
+    python - <<'PY'
+import json
+from pathlib import Path
+root = Path('/opt/software-factory/pi/skills')
+print(json.dumps({str(p.relative_to(root)): p.read_text() for p in root.rglob('*') if p.is_file()}))
+PY
     """
     result = subprocess.run(
         [
@@ -82,16 +89,20 @@ def test_shared_image_has_pinned_native_baseline_and_no_credentials() -> None:
         text=True,
         timeout=60,
     )
-    assert result.stdout.partition("\nFACTORY_INSTRUCTIONS\n")[2] == (ROOT / "agent/pi/AGENTS.md").read_text()
+    instructions, _, skills = result.stdout.partition("\nFACTORY_INSTRUCTIONS\n")[2].partition("\nFACTORY_SKILLS\n")
+    assert instructions == (ROOT / "agent/pi/AGENTS.md").read_text()
+    root = ROOT / "agent/pi/skills"
+    assert json.loads(skills) == {str(p.relative_to(root)): p.read_text() for p in root.rglob("*") if p.is_file()}
 
 
 def test_pinned_pi_loads_factory_and_target_context_without_project_trust() -> None:
     script = """
 import assert from 'node:assert/strict';
-import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { DefaultResourceLoader, SettingsManager } from
     '/usr/local/lib/node_modules/@earendil-works/pi-coding-agent/dist/index.js';
+import { parseArgs } from '/usr/local/lib/node_modules/@earendil-works/pi-coding-agent/dist/cli/args.js';
 
 const root = mkdtempSync('/tmp/factory-context-');
 try {
@@ -100,27 +111,48 @@ try {
     mkdirSync(agentDir);
     mkdirSync(join(cwd, '.pi'), { recursive: true });
     const baked = '/opt/software-factory/pi/AGENTS.md';
-    copyFileSync(baked, join(agentDir, 'AGENTS.md'));
+    const skillRoot = '/opt/software-factory/pi/skills';
+    const skillPaths = ['test-driven-development', 'ponytail'].map(name => join(skillRoot, name, 'SKILL.md'));
+    const args = parseArgs(['--no-skills', ...skillPaths.flatMap(path => ['--skill', path])]);
+    assert.deepEqual(args.skills, skillPaths);
+    assert.equal(args.noSkills, true);
+    const context = readFileSync(baked, 'utf8') + skillPaths.map(path =>
+        `\n\n# Required factory skill\nSource: ${path}\nBase directory: ${join(path, '..')}\n\n`
+        + readFileSync(path, 'utf8')).join('');
+    writeFileSync(join(agentDir, 'AGENTS.md'), context);
+    const reference = join(skillRoot, 'test-driven-development', 'testing-anti-patterns.md');
+    assert.ok(readFileSync(reference, 'utf8').includes('Testing Anti-Patterns'));
+    for (const base of [join(cwd, '.pi', 'skills', 'ponytail'), join(cwd, '.agents', 'skills', 'extra'),
+        join(agentDir, 'skills', 'extra')]) {
+        mkdirSync(base, { recursive: true });
+        const name = base.endsWith('ponytail') ? 'ponytail' : 'extra';
+        writeFileSync(join(base, 'SKILL.md'), `---\nname: ${name}\ndescription: unapproved\n---\nunapproved`);
+    }
     writeFileSync(join(cwd, 'AGENTS.md'), 'target instructions');
     writeFileSync(join(cwd, '.pi', 'settings.json'), JSON.stringify({ defaultModel: 'untrusted-model' }));
     writeFileSync(join(cwd, '.pi', 'SYSTEM.md'), 'untrusted system prompt');
     writeFileSync(join(cwd, '.pi', 'APPEND_SYSTEM.md'), 'untrusted appended prompt');
     const settingsManager = SettingsManager.create(cwd, agentDir, { projectTrusted: false });
     const loader = new DefaultResourceLoader({ cwd, agentDir, settingsManager,
-        noExtensions: true, noSkills: true, noPromptTemplates: true, noThemes: true });
+        noExtensions: true, noSkills: args.noSkills, additionalSkillPaths: args.skills,
+        noPromptTemplates: true, noThemes: true });
     await loader.reload();
-    const factory = { path: join(agentDir, 'AGENTS.md'), content: readFileSync(baked, 'utf8') };
+    const factory = { path: join(agentDir, 'AGENTS.md'), content: context };
     assert.deepEqual(loader.getAgentsFiles().agentsFiles, [factory,
         { path: join(cwd, 'AGENTS.md'), content: 'target instructions' }]);
     assert.equal(settingsManager.getDefaultModel(), undefined);
     assert.equal(loader.getSystemPrompt(), undefined);
     assert.deepEqual(loader.getAppendSystemPrompt(), []);
     assert.deepEqual(loader.getExtensions().extensions, []);
-    assert.deepEqual(loader.getSkills().skills, []);
+    assert.deepEqual(loader.getSkills().diagnostics, []);
+    assert.deepEqual(loader.getSkills().skills.map(skill => skill.filePath), skillPaths);
+    assert.deepEqual(loader.getSkills().skills.map(skill => skill.name), ['test-driven-development', 'ponytail']);
+    assert.deepEqual(loader.getPrompts().prompts, []);
     writeFileSync(join(cwd, 'AGENTS.override.md'), 'target override');
     await loader.reload();
     assert.deepEqual(loader.getAgentsFiles().agentsFiles, [factory,
         { path: join(cwd, 'AGENTS.override.md'), content: 'target override' }]);
+    assert.deepEqual(loader.getSkills().skills.map(skill => skill.filePath), skillPaths);
 } finally {
     rmSync(root, { recursive: true, force: true });
 }
@@ -238,6 +270,17 @@ def test_startup_rejects_broken_required_tool_and_removes_probe(
         "unreadable-instructions",
         "empty-instructions",
         "whitespace-instructions",
+        *[
+            f"{defect}:{file}"
+            for file in (
+                "test-driven-development/SKILL.md",
+                "test-driven-development/testing-anti-patterns.md",
+                "test-driven-development/LICENSE",
+                "ponytail/SKILL.md",
+                "ponytail/LICENSE",
+            )
+            for defect in ("missing", "unreadable", "empty", "whitespace")
+        ],
     ],
 )
 def test_startup_rejects_incompatible_image_without_runtime_repair(
@@ -257,23 +300,33 @@ def test_startup_rejects_incompatible_image_without_runtime_repair(
                     user = {"root": "0:0", "wrong-uid": "2001:2000", "wrong-gid": "2000:2001"}[defect]
                     args = [*args[:2], "--user", user, *args[2:]]
             if phase == "agent runtime" and defect not in {"root", "wrong-uid", "wrong-gid"}:
-                mutation = {
-                    "home": "chmod 0555 /tmp/factory-home",
-                    "cache": "chmod 0555 /tmp/factory-home/.cache",
-                    "prefix": "chmod 0555 /tmp/factory-home/.local",
-                    "bin": "chmod 0555 /tmp/factory-home/.local/bin",
-                    "account": "sed -i 's/^factory:/old-factory:/' /etc/passwd",
-                    "missing-cache": "rmdir /tmp/factory-home/.cache",
-                    "missing-bin": "rmdir /tmp/factory-home/.local/bin",
-                    "unsearchable-home": "chmod 0600 /tmp/factory-home",
-                    "unsearchable-cache": "chmod 0600 /tmp/factory-home/.cache",
-                    "unsearchable-prefix": "chmod 0600 /tmp/factory-home/.local",
-                    "unsearchable-bin": "chmod 0600 /tmp/factory-home/.local/bin",
-                    "missing-instructions": "rm /opt/software-factory/pi/AGENTS.md",
-                    "unreadable-instructions": "chmod 000 /opt/software-factory/pi/AGENTS.md",
-                    "empty-instructions": ": > /opt/software-factory/pi/AGENTS.md",
-                    "whitespace-instructions": "printf ' \\n\\t' > /opt/software-factory/pi/AGENTS.md",
-                }[defect]
+                if ":" in defect:
+                    mode, file = defect.split(":", 1)
+                    path = "/opt/software-factory/pi/skills/" + file
+                    mutation = {
+                        "missing": f"rm {path}",
+                        "unreadable": f"chmod 000 {path}",
+                        "empty": f": > {path}",
+                        "whitespace": f"printf ' \\n\\t' > {path}",
+                    }[mode]
+                else:
+                    mutation = {
+                        "home": "chmod 0555 /tmp/factory-home",
+                        "cache": "chmod 0555 /tmp/factory-home/.cache",
+                        "prefix": "chmod 0555 /tmp/factory-home/.local",
+                        "bin": "chmod 0555 /tmp/factory-home/.local/bin",
+                        "account": "sed -i 's/^factory:/old-factory:/' /etc/passwd",
+                        "missing-cache": "rmdir /tmp/factory-home/.cache",
+                        "missing-bin": "rmdir /tmp/factory-home/.local/bin",
+                        "unsearchable-home": "chmod 0600 /tmp/factory-home",
+                        "unsearchable-cache": "chmod 0600 /tmp/factory-home/.cache",
+                        "unsearchable-prefix": "chmod 0600 /tmp/factory-home/.local",
+                        "unsearchable-bin": "chmod 0600 /tmp/factory-home/.local/bin",
+                        "missing-instructions": "rm /opt/software-factory/pi/AGENTS.md",
+                        "unreadable-instructions": "chmod 000 /opt/software-factory/pi/AGENTS.md",
+                        "empty-instructions": ": > /opt/software-factory/pi/AGENTS.md",
+                        "whitespace-instructions": "printf ' \\n\\t' > /opt/software-factory/pi/AGENTS.md",
+                    }[defect]
                 super().run(
                     ["docker", "exec", "--user", "0:0", names[0], "sh", "-ec", mutation],
                     "break fixture image",

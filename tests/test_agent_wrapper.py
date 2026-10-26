@@ -13,6 +13,15 @@ from software_factory.sandbox import PI_FLAGS
 
 ROOT = Path(__file__).resolve().parents[1]
 INSTRUCTIONS = Path("/opt/software-factory/pi/AGENTS.md")
+SKILLS = Path("/opt/software-factory/pi/skills")
+SKILL_NAMES = ("test-driven-development", "ponytail")
+SKILL_FILES = (
+    "test-driven-development/SKILL.md",
+    "test-driven-development/testing-anti-patterns.md",
+    "test-driven-development/LICENSE",
+    "ponytail/SKILL.md",
+    "ponytail/LICENSE",
+)
 
 
 @pytest.mark.parametrize("execution", ["script", "in-process"])
@@ -20,6 +29,7 @@ INSTRUCTIONS = Path("/opt/software-factory/pi/AGENTS.md")
     "outcome",
     [
         "success",
+        "updated-skills",
         "repair",
         "missing-instructions",
         "unreadable-instructions",
@@ -34,6 +44,7 @@ INSTRUCTIONS = Path("/opt/software-factory/pi/AGENTS.md")
         "terminated",
         "missing-pi",
         "missing-execution",
+        *[f"{defect}:{file}" for file in SKILL_FILES for defect in ("missing", "unreadable", "empty", "whitespace")],
     ],
 )
 def test_agent_wrapper_uses_ephemeral_credentials_and_exact_model(
@@ -48,6 +59,25 @@ def test_agent_wrapper_uses_ephemeral_credentials_and_exact_model(
     if outcome == "unreadable-instructions":
         instructions.unlink()
         instructions.mkdir()  # A real read failure, independent of the test account's privileges.
+    skills = tmp_path / "skills"
+    for file in SKILL_FILES:
+        path = skills / file
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(f"---\nname: {path.parent.name}\ndescription: fixture\n---\n\n{file} rules\n")
+    if outcome == "updated-skills":
+        for file in SKILL_FILES:
+            path = skills / file
+            path.write_text(path.read_text() + "Updated source content without a checksum manifest.\n")
+    if ":" in outcome:
+        defect, file = outcome.split(":", 1)
+        path = skills / file
+        if defect in {"missing", "unreadable"}:
+            path.unlink()
+            if defect == "unreadable":
+                path.mkdir()
+        else:
+            path.write_text({"empty": "", "whitespace": " \n\t"}[defect])
+    skill_paths = [str((skills if execution == "script" else SKILLS) / name / "SKILL.md") for name in SKILL_NAMES]
     pi = tmp_path / "pi"
     pi.write_text(
         f"#!{sys.executable}\n"
@@ -57,7 +87,7 @@ def test_agent_wrapper_uses_ephemeral_credentials_and_exact_model(
         "assert stat.S_IMODE(home.stat().st_mode) == 0o700\n"
         "assert stat.S_IMODE((home/'auth.json').stat().st_mode) == 0o600\n"
         "assert '--no-context-files' not in sys.argv\n"
-        "assert (home/'AGENTS.md').read_text() == 'factory rules\\n'\n"
+        "assert (home/'AGENTS.md').read_text().startswith('factory rules\\n')\n"
         "assert 'private-bearer' not in ' '.join(sys.argv)\n"
         "assert os.environ['PI_OFFLINE'] == '1'\n"
         "assert os.environ['PI_TELEMETRY'] == '0'\n"
@@ -69,6 +99,10 @@ def test_agent_wrapper_uses_ephemeral_credentials_and_exact_model(
         f"if {outcome != 'empty-catalog'} else '')\n"
         f"    sys.exit({7 if outcome == 'catalog-failure' else 0})\n"
         "else:\n"
+        f"    assert [sys.argv[i+1] for i, arg in enumerate(sys.argv) if arg == '--skill'] == {skill_paths!r}\n"
+        "    assert '--no-skills' in sys.argv\n"
+        f"    for path in {skill_paths!r}:\n"
+        "        assert path in (home/'AGENTS.md').read_text()\n"
         "    print(json.dumps({'args': sys.argv[1:], 'auth': json.loads((home/'auth.json').read_text()), "
         "'models': json.loads((home/'models.json').read_text()), 'prompt': sys.stdin.read(), "
         "'home': str(home), 'instructions': (home/'AGENTS.md').read_text()}), flush=True)\n"
@@ -90,7 +124,12 @@ def test_agent_wrapper_uses_ephemeral_credentials_and_exact_model(
     # Execute real child processes in both modes; runpy also measures the standalone wrapper's Python coverage.
     if execution == "script":
         result = subprocess.run(
-            [sys.executable, "-I", "-c", wrapper.read_text().replace(str(INSTRUCTIONS), str(instructions))],
+            [
+                sys.executable,
+                "-I",
+                "-c",
+                wrapper.read_text().replace(str(INSTRUCTIONS), str(instructions)).replace(str(SKILLS), str(skills)),
+            ],
             input=json.dumps(payload),
             text=True,
             capture_output=True,
@@ -99,10 +138,12 @@ def test_agent_wrapper_uses_ephemeral_credentials_and_exact_model(
     else:
         read_text = Path.read_text
 
-        def read_instructions(path, *args, **kwargs):
-            return read_text(instructions if path == INSTRUCTIONS else path, *args, **kwargs)
+        def redirected(path):
+            if path == INSTRUCTIONS:
+                return instructions
+            return skills / path.relative_to(SKILLS) if path.is_relative_to(SKILLS) else path
 
-        monkeypatch.setattr(Path, "read_text", read_instructions)
+        monkeypatch.setattr(Path, "read_text", lambda path, *a, **kw: read_text(redirected(path), *a, **kw))
         monkeypatch.setattr("tempfile.tempdir", str(tmp_path))
         monkeypatch.setenv("PATH", str(tmp_path))
         monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(payload)))
@@ -115,6 +156,12 @@ def test_agent_wrapper_uses_ephemeral_credentials_and_exact_model(
         assert not Path(record.read_text()).exists()
     assert "private-bearer" not in result.stderr
     assert not list(tmp_path.glob("factory-pi-*"))
+    if ":" in outcome:
+        assert result.returncode == 1
+        assert "factory Pi skills unavailable or incompatible; rebuild the shared image, then restart" in result.stderr
+        assert "Traceback" not in result.stderr
+        assert not record.exists(), "Pi must not run with unavailable or empty required skills"
+        return
     if outcome.endswith("-instructions"):
         assert result.returncode == 1
         assert "factory Pi instructions unavailable; rebuild the shared image, then restart" in result.stderr
@@ -131,14 +178,18 @@ def test_agent_wrapper_uses_ephemeral_credentials_and_exact_model(
         assert "configured Copilot model is unavailable" in result.stderr
         assert "private-bearer" not in result.stderr
         return
-    expected = {"success": 0, "repair": 0, "execution-failure": 8, "terminated": 1}
+    expected = {"success": 0, "updated-skills": 0, "repair": 0, "execution-failure": 8, "terminated": 1}
     assert result.returncode == expected[outcome], result.stderr
     output = json.loads(result.stdout)
     assert not Path(output["home"]).exists()
     assert output["auth"] == {"github-copilot": {"type": "api_key", "key": "private-bearer"}}
     assert output["models"]["providers"]["github-copilot"]["baseUrl"] == payload["endpoint"]
     assert "private-bearer" not in output["prompt"]
-    assert output["instructions"] == "factory rules\n"
+    assert output["instructions"].startswith("factory rules\n")
+    for name, skill_path in zip(SKILL_NAMES, skill_paths, strict=True):
+        assert output["instructions"].count((skills / name / "SKILL.md").read_text()) == 1
+        assert skill_path in output["instructions"]
+        assert f"{name}/SKILL.md rules" not in output["prompt"]
     assert "factory rules" not in output["prompt"]
     assert "COMPOSE_PROJECT_NAME" not in output["prompt"]
     assert "Do not publish, commit, or push" not in output["prompt"]

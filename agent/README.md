@@ -65,7 +65,9 @@ boundary.
 [`pi/AGENTS.md`](pi/AGENTS.md) is the version-controlled source of standing
 implementation instructions, baked into `/opt/software-factory/pi/AGENTS.md`.
 The Python wrapper copies it into each invocation's private temporary Pi agent
-directory as `AGENTS.md`, alongside ephemeral credential/model configuration.
+directory as `AGENTS.md`, followed by the complete reviewed TDD and Ponytail full
+skill instructions and their baked source/base-directory paths, alongside ephemeral
+credential/model configuration.
 Pi loads this factory context alongside the target repository's context files;
 it does not replace target `AGENTS.md` or Pi's default system prompt. The wrapper
 sends the immutable issue snapshot separately through stdin, not embedded in the
@@ -77,8 +79,58 @@ adopt source-file edits. Startup rejects missing, unreadable, or empty instructi
 files with rebuild/restart guidance. The wrapper also fails rather than invoking
 Pi without readable, nonempty factory instructions. No runtime fallback or target
 workspace copy is provided. Repository context remains untrusted model input,
-not an enforcement mechanism. Skills and trust-gated project configuration remain
-disabled.
+not an enforcement mechanism. Discovered/configured skills and trust-gated project
+configuration remain disabled. Only the two baked factory skills are explicitly
+allowlisted with `--skill` during implementation, while `--no-skills` stays enabled.
+Host authentication and the model catalog check do not load implementation skills.
+
+## Pinned implementation skills
+
+The checked-in [`pi/skills/`](pi/skills/) bundle is copied to
+`/opt/software-factory/pi/skills/`. There are no runtime downloads, packages,
+updates, new settings, or dependencies. Both full skills are included in temporary
+factory context, not only advertised for optional model selection. Relative TDD
+references resolve against its stated baked base directory. The wrapper never
+copies skills into the target workspace or replaces Pi's default system prompt.
+
+Sources and adaptations:
+
+- **TDD:** the operator-selected `~/.agents/skills/test-driven-development/SKILL.md`,
+  tracked at `TeroTS/.agents` file revision
+  `512ea122a8b7017f054b71479b77ea3830ea96eb`.
+  Its description and applicability rules are preserved. Comparison with
+  [upstream](https://github.com/obra/superpowers/tree/9ea7e2b6cb27161545e8d906aebd831d5311f5dd/skills/test-driven-development)
+  confirms the same remaining guidance except the local reference syntax. The
+  missing `testing-anti-patterns.md` and MIT notice (Jesse Vincent) were recovered
+  from that exact upstream revision.
+  Factory adaptations add unattended/safety boundaries, protect pre-existing and
+  unrelated work from deletion, replace human clarification with blocker reporting,
+  use a normal relative reference link, and label reference questions as review
+  questions rather than human interaction. The remainder of the TDD examples and
+  red/green/refactor guidance is retained.
+- **Ponytail:**
+  [DietrichGebert/ponytail](https://github.com/DietrichGebert/ponytail/tree/09c434ab73ca43761c5d8b0c5d341926c2fba710/skills/ponytail),
+  revision `09c434ab73ca43761c5d8b0c5d341926c2fba710`, MIT (DietrichGebert). Factory adaptations fix full mode, remove interactive
+  switching/clarification, defer to target repository coding/comment conventions,
+  preserve existing work and tests, align small behavior changes with TDD, and
+  preserve the issue-run deadline and publication/repair restrictions.
+
+Each skill directory carries its MIT notice. Startup and the wrapper require
+readable, nonempty skill files, the supporting reference, and license notices;
+failures require explicit rebuild/restart, not runtime repair. There is no skill
+checksum manifest or runtime checksum validation. Git and the immutable session
+image ID identify the bundle version; image tests compare exact file contents
+and verify actual pinned Pi loading.
+
+Review changes to skill content and references, then explicitly rebuild/restart
+and rerun image/execution checks. No automatic source/version refresh is performed.
+
+TDD requires an observed expected failing test for production behavior changes,
+then minimal passing code and green refactoring; nonbehavioral changes need no
+artificial failure. Ponytail full requires the smallest complete solution, not
+shortcuts around safety or tests. Loading these instructions does not prove the
+model followed them. Existing verification, independent target CI, and human
+review remain required; no transcript audit or new publication gate is added.
 
 ## Fixed-identity startup and migration
 
@@ -127,7 +179,9 @@ Pi/authentication/GitHub boundaries are scripted; no live provider request or
 GitHub write is made. A separate image test uses the pinned Pi resource loader
 without network access to verify factory and target context load together while
 untrusted project settings/system prompts stay disabled, including a target
-`AGENTS.override.md` that does not suppress factory context. macOS browser access
+`AGENTS.override.md` that does not suppress factory context. It also checks the two
+explicit skill paths load under `--no-skills`, full instructions remain in factory
+context, and target-discovered resources stay disabled. macOS browser access
 to guest services requires a separate check; it cannot be inferred from Linux CI.
 
 New agents use the image's unmodified Docker executable directly; no runtime

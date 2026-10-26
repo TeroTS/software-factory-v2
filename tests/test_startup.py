@@ -51,6 +51,7 @@ def test_startup_resolves_local_image_and_checks_execution_without_claims(startu
     assert auth.kwargs["cwd"].parent == config.artifacts_dir
     assert auth.kwargs["cwd"].name.startswith(".startup-auth-")
     assert "--no-context-files" in auth.args[0] and "--offline" in auth.args[0]
+    assert "--skill" not in auth.args[0], "implementation skills must not load during host authentication"
     assert "agent runtime" in phases
     assert phases[-1] == "startup cleanup"
     assert "--volumes" in calls[-1].args[0], "remove any anonymous volumes declared by the trusted probe image"
@@ -231,19 +232,83 @@ def test_startup_checks_baked_identity_tools_home_and_sudo_without_user_initiali
     assert calls[-1].args[1] == "startup cleanup"
 
 
+@pytest.fixture
+def baked_skills(tmp_path: Path) -> Path:
+    skills = tmp_path / "skills"
+    files = (
+        "test-driven-development/SKILL.md",
+        "test-driven-development/testing-anti-patterns.md",
+        "test-driven-development/LICENSE",
+        "ponytail/SKILL.md",
+        "ponytail/LICENSE",
+    )
+    for file in files:
+        path = skills / file
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(file + " content\n")
+    return skills
+
+
 @pytest.mark.parametrize("contents", [None, "", " \n\t", "factory instructions\n"])
-def test_startup_probe_requires_readable_nonempty_factory_instructions(tmp_path: Path, contents: str | None) -> None:
+def test_startup_probe_requires_readable_nonempty_factory_instructions(
+    tmp_path: Path, contents: str | None, baked_skills: Path
+) -> None:
     path = tmp_path / "AGENTS.md"
     if contents is not None:
         path.write_text(contents)
     check = RUNTIME_CHECK.split(' test "$(id -u)"', 1)[0]
     assert "/opt/software-factory/pi/AGENTS.md" in check
     result = subprocess.run(
-        ["sh", "-ec", check.replace("/opt/software-factory/pi/AGENTS.md", str(path))],
+        [
+            "sh",
+            "-ec",
+            check.replace("/opt/software-factory/pi/AGENTS.md", str(path)).replace(
+                "/opt/software-factory/pi/skills", str(baked_skills)
+            ),
+        ],
         capture_output=True,
         text=True,
     )
     assert (result.returncode == 0) == bool(contents and contents.strip())
+
+
+@pytest.mark.parametrize(
+    "file",
+    [
+        "test-driven-development/SKILL.md",
+        "test-driven-development/testing-anti-patterns.md",
+        "test-driven-development/LICENSE",
+        "ponytail/SKILL.md",
+        "ponytail/LICENSE",
+    ],
+)
+@pytest.mark.parametrize("defect", ["missing", "unreadable", "empty", "whitespace", "updated"])
+def test_startup_probe_requires_readable_nonempty_skills_without_checksums(
+    tmp_path: Path, baked_skills: Path, file: str, defect: str
+) -> None:
+    instructions = tmp_path / "AGENTS.md"
+    instructions.write_text("factory rules\n")
+    path = baked_skills / file
+    if defect in {"missing", "unreadable"}:
+        path.unlink()
+        if defect == "unreadable":
+            path.mkdir()
+    else:
+        path.write_text({"empty": "", "whitespace": " \n\t", "updated": "updated source content\n"}[defect])
+    check = RUNTIME_CHECK.split(' test "$(id -u)"', 1)[0]
+    assert "/opt/software-factory/pi/skills" in check
+    result = subprocess.run(
+        [
+            "sh",
+            "-ec",
+            check.replace("/opt/software-factory/pi/AGENTS.md", str(instructions)).replace(
+                "/opt/software-factory/pi/skills", str(baked_skills)
+            ),
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert (result.returncode == 0) == (defect == "updated")
 
 
 def test_startup_preserves_previous_artifacts(startup) -> None:
