@@ -22,9 +22,7 @@ def main() -> int:
         files = (
             "test-driven-development/SKILL.md",
             "test-driven-development/testing-anti-patterns.md",
-            "test-driven-development/LICENSE",
             "ponytail/SKILL.md",
-            "ponytail/LICENSE",
         )
         contents = {file: (skills / file).read_text(encoding="utf-8") for file in files}
         if any(not text.strip() for text in contents.values()):

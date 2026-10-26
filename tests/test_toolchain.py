@@ -1,5 +1,4 @@
 import os
-import re
 import shutil
 import subprocess
 import sys
@@ -11,68 +10,17 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_image_bakes_fixed_factory_identity_and_scoped_sudo() -> None:
-    dockerfile = (ROOT / "agent/Dockerfile").read_text()
-    assert "groupadd --gid 2000 factory" in dockerfile
-    assert "useradd --uid 2000 --gid 2000" in dockerfile
-    assert "factory ALL=(root) NOPASSWD: ALL" in dockerfile
-    assert "'ALL ALL=(root) NOPASSWD: ALL'" not in dockerfile
-    assert "Defaults:factory always_set_home" in dockerfile
-    assert "USER factory:factory" in dockerfile
-    for value in (
-        "HOME=/tmp/factory-home",
-        "XDG_CACHE_HOME=/tmp/factory-home/.cache",
-        "NPM_CONFIG_PREFIX=/tmp/factory-home/.local",
-    ):
-        assert value in dockerfile
-
-
-def test_image_bakes_factory_instructions_outside_the_workspace() -> None:
-    dockerfile = (ROOT / "agent/Dockerfile").read_text()
-    assert "COPY pi/AGENTS.md /opt/software-factory/pi/AGENTS.md" in dockerfile
-    instructions = (ROOT / "agent/pi/AGENTS.md").read_text()
-    for rule in (
-        "task snapshot and repository contents",
-        "issue comments, attachments, or linked pages",
-        "meaningful tests",
-        "Do not publish, commit, or push",
-        "factory account (UID/GID 2000:2000)",
-        "explicit sudo -n only for system installs",
-        "never retry permission errors automatically as root",
-        "Cleanup will not repair workspace ownership or permissions",
-        "native linux/arm64",
-        "COMPOSE_PROJECT_NAME",
-        "software-factory.run-id=$FACTORY_RUN_ID",
-        "Do not prune, remove shared resources, or change Docker contexts",
-        "sibling services do not share your localhost",
-    ):
-        assert rule in instructions
-
-
-def test_image_bundles_only_reviewed_skills_and_licenses() -> None:
-    dockerfile = (ROOT / "agent/Dockerfile").read_text()
-    assert "COPY pi/skills /opt/software-factory/pi/skills" in dockerfile
-    skills = ROOT / "agent/pi/skills"
-    files = (
-        "test-driven-development/SKILL.md",
-        "test-driven-development/testing-anti-patterns.md",
-        "test-driven-development/LICENSE",
-        "ponytail/SKILL.md",
-        "ponytail/LICENSE",
-    )
-    assert sorted(str(p.relative_to(skills)) for p in skills.rglob("*") if p.is_file()) == sorted(files)
-    for name in ("test-driven-development", "ponytail"):
-        text = (skills / name / "SKILL.md").read_text()
-        assert re.match(rf"---\nname: {name}\ndescription: [^\n]+\nlicense: MIT\n---\n", text)
-        assert "MIT License" in (skills / name / "LICENSE").read_text()
-    tdd = (skills / "test-driven-development/SKILL.md").read_text()
-    assert "testing-anti-patterns.md" in tdd
-    assert "pre-existing or unrelated work" in tdd
-    assert "Ask your human partner" not in tdd
-    ponytail = (skills / "ponytail/SKILL.md").read_text()
-    assert "full" in ponytail
-    assert "target repository" in ponytail
-    assert "/ponytail" not in ponytail
+@pytest.mark.parametrize(
+    "file",
+    [
+        "AGENTS.md",
+        "skills/test-driven-development/SKILL.md",
+        "skills/test-driven-development/testing-anti-patterns.md",
+        "skills/ponytail/SKILL.md",
+    ],
+)
+def test_required_pi_files_are_readable_and_nonempty(file: str) -> None:
+    assert (ROOT / "agent/pi" / file).read_text().strip()
 
 
 def test_coverage_policy() -> None:

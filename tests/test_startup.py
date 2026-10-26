@@ -1,4 +1,5 @@
 import json
+import os
 import subprocess
 import time
 from pathlib import Path
@@ -214,18 +215,12 @@ def test_artifact_probe_failure_is_safe(startup, monkeypatch) -> None:
     assert "secret" not in str(failure.value)
 
 
-def test_startup_checks_baked_identity_tools_home_and_sudo_without_user_initialization(startup) -> None:
+def test_startup_probes_default_identity_without_user_initialization(startup) -> None:
     preflight(startup[0])
     calls = startup[1].run.call_args_list
     runtime = next(call.args[0] for call in calls if call.args[1] == "agent runtime")
     assert runtime[:3] == ["docker", "exec", "-i"]
-    assert "sudo -n" in runtime[-1]
-    assert 'test -w "$HOME"' in runtime[-1]
-    assert 'test "$(id -u)" = 2000' in runtime[-1]
-    assert 'test "$(id -g)" = 2000' in runtime[-1]
-    assert 'test "$(id -un)" = factory' in runtime[-1]
-    assert 'test -w "$NPM_CONFIG_PREFIX"' in runtime[-1]
-    assert 'test "$HOME" = /root' in runtime[-1]
+    assert runtime[-1] == RUNTIME_CHECK
     probe = next(call.args[0] for call in calls if call.args[1] == "startup agent")
     assert "--user" not in probe and "--env" not in probe
     assert "agent user configuration" not in [call.args[1] for call in calls]
@@ -238,9 +233,7 @@ def baked_skills(tmp_path: Path) -> Path:
     files = (
         "test-driven-development/SKILL.md",
         "test-driven-development/testing-anti-patterns.md",
-        "test-driven-development/LICENSE",
         "ponytail/SKILL.md",
-        "ponytail/LICENSE",
     )
     for file in files:
         path = skills / file
@@ -277,9 +270,7 @@ def test_startup_probe_requires_readable_nonempty_factory_instructions(
     [
         "test-driven-development/SKILL.md",
         "test-driven-development/testing-anti-patterns.md",
-        "test-driven-development/LICENSE",
         "ponytail/SKILL.md",
-        "ponytail/LICENSE",
     ],
 )
 @pytest.mark.parametrize("defect", ["missing", "unreadable", "empty", "whitespace", "updated"])
@@ -309,6 +300,88 @@ def test_startup_probe_requires_readable_nonempty_skills_without_checksums(
         text=True,
     )
     assert (result.returncode == 0) == (defect == "updated")
+
+
+@pytest.mark.parametrize(
+    "defect",
+    [
+        None,
+        "root",
+        "wrong-uid",
+        "wrong-gid",
+        "tool",
+        "sudo",
+        *[
+            f"{mode}:{directory}"
+            for directory in ("home", "cache", "prefix", "bin")
+            for mode in ("missing", "unreadable", "unwritable", "unsearchable")
+        ],
+    ],
+)
+def test_runtime_probe_checks_capabilities_not_image_layout(
+    tmp_path: Path, baked_skills: Path, defect: str | None
+) -> None:
+    instructions = tmp_path / "AGENTS.md"
+    instructions.write_text("factory rules\n")
+    certificates = tmp_path / "certificates"
+    certificates.write_text("fixture certificates\n")
+    directories = {name: tmp_path / name for name in ("home", "cache", "prefix")}
+    directories["bin"] = directories["prefix"] / "bin"
+    for directory in directories.values():
+        directory.mkdir()
+    tools = tmp_path / "tools"
+    tools.mkdir()
+    stub = tools / "stub"
+    stub.write_text(
+        "#!/bin/sh\n"
+        "tool=${0##*/}\n"
+        '[ "$tool" != "$BROKEN_TOOL" ] || exit 42\n'
+        'case "$tool" in\n'
+        '  id) case "$1" in -u) echo "$TEST_UID";; -g) echo "$TEST_GID";; *) exit 1;; esac;;\n'
+        "  uname) echo aarch64;;\n"
+        '  sudo) shift; TEST_UID=0 HOME=/root "$@";;\n'
+        "esac\n"
+    )
+    stub.chmod(0o755)
+    for tool in "id uname sudo pi node npm docker python uv bash git make cc c++ curl tar unzip".split():
+        (tools / tool).symlink_to(stub)
+    env = {
+        **os.environ,
+        "HOME": str(directories["home"]),
+        "XDG_CACHE_HOME": str(directories["cache"]),
+        "NPM_CONFIG_PREFIX": str(directories["prefix"]),
+        "PATH": f"{tools}:{directories['bin']}:/usr/bin:/bin",
+        "TEST_UID": "0" if defect == "root" else "2001" if defect == "wrong-uid" else "2000",
+        "TEST_GID": "2001" if defect == "wrong-gid" else "2000",
+        "BROKEN_TOOL": {"tool": "git", "sudo": "sudo"}.get(defect, ""),
+    }
+    path = None
+    if defect and ":" in defect:
+        mode, name = defect.split(":")
+        path = directories[name]
+        if mode == "missing":
+            if name == "bin":
+                path.rmdir()
+                path = None
+            else:
+                env[{"home": "HOME", "cache": "XDG_CACHE_HOME", "prefix": "NPM_CONFIG_PREFIX"}[name]] = str(
+                    tmp_path / "absent"
+                )
+        else:
+            if os.geteuid() == 0:
+                pytest.skip("permission capabilities require a non-root test account")
+            path.chmod({"unreadable": 0o300, "unwritable": 0o500, "unsearchable": 0o600}[mode])
+    check = (
+        RUNTIME_CHECK.replace("/opt/software-factory/pi/AGENTS.md", str(instructions))
+        .replace("/opt/software-factory/pi/skills", str(baked_skills))
+        .replace("/etc/ssl/certs/ca-certificates.crt", str(certificates))
+    )
+    try:
+        result = subprocess.run(["/bin/sh", "-ec", check], env=env, capture_output=True, text=True)
+        assert (result.returncode == 0) == (defect is None), result.stderr
+    finally:
+        if path is not None:
+            path.chmod(0o700)
 
 
 def test_startup_preserves_previous_artifacts(startup) -> None:

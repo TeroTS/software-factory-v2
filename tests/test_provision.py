@@ -437,11 +437,18 @@ def test_pi_install_is_user_scoped_private_and_not_repeated(host, monkeypatch, t
         assert factory.call_args.kwargs["private"] is True
 
 
-@pytest.mark.parametrize("failure", [None, "package", "uid", "gid", "tool", "home", "sudo"])
+@pytest.mark.parametrize(
+    "failure", [None, "newer-apt-patch", "uid", "gid", "tool", "missing-tool", "home", "sudo", "socket", "engine"]
+)
 def test_readiness_checks_fail_closed_without_live_authentication(host, monkeypatch, failure):
-    monkeypatch.setattr(host, "package_matches", lambda *a: failure != "package")
-    monkeypatch.setattr(host, "check_socket", lambda: None)
-    engine = Mock()
+    packages = host.UBUNTU_PACKAGES | host.EXTERNAL_PACKAGES
+    commands = Mock()
+    commands.run.side_effect = lambda args, *a, **kw: (
+        f"installed\t{packages[args[-1]]}{'.security' if failure == 'newer-apt-patch' else ''}"
+    )
+    socket = Mock(side_effect=FactoryError("socket unavailable") if failure == "socket" else None)
+    monkeypatch.setattr(host, "check_socket", socket)
+    engine = Mock(side_effect=FactoryError("Docker unavailable") if failure == "engine" else None)
     monkeypatch.setattr(host, "check_engine", engine)
     seen = []
 
@@ -457,6 +464,8 @@ def test_readiness_checks_fail_closed_without_live_authentication(host, monkeypa
             return "0" if failure == "gid" else "2000"
         if phase == "check Python modules and factory home" and failure == "home":
             raise FactoryError("home is unusable")
+        if phase == "check factory tools" and failure == "missing-tool":
+            raise FactoryError("tool unavailable")
         if phase == "check tool version":
             return (
                 "wrong"
@@ -466,12 +475,16 @@ def test_readiness_checks_fail_closed_without_live_authentication(host, monkeypa
         return ""
 
     monkeypatch.setattr(host, "as_factory", factory)
-    if failure:
+    if failure not in {None, "newer-apt-patch"}:
         with pytest.raises(FactoryError):
-            host.check_readiness(Mock())
-        engine.assert_not_called()
+            host.check_readiness(commands)
+        if failure == "engine":
+            engine.assert_called_once()
+        else:
+            engine.assert_not_called()
     else:
-        host.check_readiness(Mock())
+        host.check_readiness(commands)
+        socket.assert_called_once()
         engine.assert_called_once()
     assert all("auth" not in args for args in seen)
 

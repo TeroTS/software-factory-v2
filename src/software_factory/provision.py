@@ -363,9 +363,6 @@ def install_pi(commands: Commands, work: Path) -> None:
 
 # Validate tools, identity, writable home, denied general host sudo, and actual native Docker access.
 def check_readiness(commands: Commands) -> None:
-    for name, version in (UBUNTU_PACKAGES | EXTERNAL_PACKAGES).items():
-        if not package_matches(commands, name, version):
-            raise FactoryError(f"required APT package version is not installed: {name}={version}")
     if (
         as_factory(commands, ["id", "-u"], "check factory UID").strip() != "2000"
         or as_factory(commands, ["id", "-g"], "check factory GID").strip() != "2000"

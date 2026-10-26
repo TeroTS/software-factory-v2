@@ -1,7 +1,3 @@
- 2. Add TDD and Ponytail skills
-    Bundle pinned, approved skills in the shared image and explicitly load them during implementation. Require
-    test-first development and the smallest complete solution.
-
  3. Generate and publish tickets from SPEC.md
     Add a planning skill and fixed issue template covering stable story IDs, source-spec revision, scope, acceptance
     criteria, verification, and dependencies. Publish approved plans through a deterministic script with validation,

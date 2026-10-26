@@ -18,9 +18,7 @@ SKILL_NAMES = ("test-driven-development", "ponytail")
 SKILL_FILES = (
     "test-driven-development/SKILL.md",
     "test-driven-development/testing-anti-patterns.md",
-    "test-driven-development/LICENSE",
     "ponytail/SKILL.md",
-    "ponytail/LICENSE",
 )
 
 

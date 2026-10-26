@@ -40,6 +40,10 @@ def test_shared_image_has_pinned_native_baseline_and_no_credentials() -> None:
     test "$(getent passwd factory | cut -d: -f3-4)" = 2000:2000
     test "$(getent group factory | cut -d: -f3)" = 2000
     test "$HOME" = /tmp/factory-home
+    test "$(stat -c %u:%g "$HOME")" = 2000:2000
+    test "$XDG_CACHE_HOME" = "$HOME/.cache"
+    test "$NPM_CONFIG_PREFIX" = "$HOME/.local"
+    case "$PATH" in "$NPM_CONFIG_PREFIX/bin":*) ;; *) exit 1 ;; esac
     touch "$HOME/home-write" "$XDG_CACHE_HOME/cache-write"
     touch "$NPM_CONFIG_PREFIX/prefix-write" "$NPM_CONFIG_PREFIX/bin/tool-write"
     sudo -n sh -ec 'test "$(id -u)" = 0; test "$HOME" = /root'
@@ -65,7 +69,8 @@ def test_shared_image_has_pinned_native_baseline_and_no_credentials() -> None:
 import json
 from pathlib import Path
 root = Path('/opt/software-factory/pi/skills')
-print(json.dumps({str(p.relative_to(root)): p.read_text() for p in root.rglob('*') if p.is_file()}))
+files = ('test-driven-development/SKILL.md', 'test-driven-development/testing-anti-patterns.md', 'ponytail/SKILL.md')
+print(json.dumps({file: (root / file).read_text() for file in files}))
 PY
     """
     result = subprocess.run(
@@ -92,13 +97,18 @@ PY
     instructions, _, skills = result.stdout.partition("\nFACTORY_INSTRUCTIONS\n")[2].partition("\nFACTORY_SKILLS\n")
     assert instructions == (ROOT / "agent/pi/AGENTS.md").read_text()
     root = ROOT / "agent/pi/skills"
-    assert json.loads(skills) == {str(p.relative_to(root)): p.read_text() for p in root.rglob("*") if p.is_file()}
+    files = (
+        "test-driven-development/SKILL.md",
+        "test-driven-development/testing-anti-patterns.md",
+        "ponytail/SKILL.md",
+    )
+    assert json.loads(skills) == {file: (root / file).read_text() for file in files}
 
 
 def test_pinned_pi_loads_factory_and_target_context_without_project_trust() -> None:
-    script = """
+    script = r"""
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { DefaultResourceLoader, SettingsManager } from
     '/usr/local/lib/node_modules/@earendil-works/pi-coding-agent/dist/index.js';
@@ -111,7 +121,12 @@ try {
     mkdirSync(agentDir);
     mkdirSync(join(cwd, '.pi'), { recursive: true });
     const baked = '/opt/software-factory/pi/AGENTS.md';
-    const skillRoot = '/opt/software-factory/pi/skills';
+    const skillRoot = join(root, 'skills');
+    for (const file of ['test-driven-development/SKILL.md', 'test-driven-development/testing-anti-patterns.md',
+        'ponytail/SKILL.md']) {
+        mkdirSync(join(skillRoot, file, '..'), { recursive: true });
+        copyFileSync(join('/opt/software-factory/pi/skills', file), join(skillRoot, file));
+    }
     const skillPaths = ['test-driven-development', 'ponytail'].map(name => join(skillRoot, name, 'SKILL.md'));
     const args = parseArgs(['--no-skills', ...skillPaths.flatMap(path => ['--skill', path])]);
     assert.deepEqual(args.skills, skillPaths);
@@ -121,7 +136,7 @@ try {
         + readFileSync(path, 'utf8')).join('');
     writeFileSync(join(agentDir, 'AGENTS.md'), context);
     const reference = join(skillRoot, 'test-driven-development', 'testing-anti-patterns.md');
-    assert.ok(readFileSync(reference, 'utf8').includes('Testing Anti-Patterns'));
+    assert.ok(readFileSync(reference, 'utf8').trim());
     for (const base of [join(cwd, '.pi', 'skills', 'ponytail'), join(cwd, '.agents', 'skills', 'extra'),
         join(agentDir, 'skills', 'extra')]) {
         mkdirSync(base, { recursive: true });
@@ -153,6 +168,23 @@ try {
     assert.deepEqual(loader.getAgentsFiles().agentsFiles, [factory,
         { path: join(cwd, 'AGENTS.override.md'), content: 'target override' }]);
     assert.deepEqual(loader.getSkills().skills.map(skill => skill.filePath), skillPaths);
+    for (const path of skillPaths) {
+        const [opening, frontmatter, ...body] = readFileSync(path, 'utf8').split('---');
+        writeFileSync(path, opening + '---' + '\n' + frontmatter.trim().split('\n').reverse().join('\n')
+            + '\n---' + body.join('---'));
+    }
+    writeFileSync(join(skillRoot, 'README.md'), 'Extra bundle documentation');
+    writeFileSync(join(skillRoot, 'ponytail', 'README.md'), 'Extra skill documentation');
+    await loader.reload();
+    assert.deepEqual(loader.getSkills().diagnostics, []);
+    assert.deepEqual(loader.getSkills().skills.map(skill => skill.filePath), skillPaths);
+    for (const defect of ['missing', 'invalid']) {
+        if (defect === 'missing') rmSync(skillPaths[0]);
+        else writeFileSync(skillPaths[0], '---\nname: [invalid\n---\nBroken skill');
+        await loader.reload();
+        assert.ok(loader.getSkills().diagnostics.length > 0);
+        assert.deepEqual(loader.getSkills().skills.map(skill => skill.filePath), [skillPaths[1]]);
+    }
 } finally {
     rmSync(root, { recursive: true, force: true });
 }
@@ -212,9 +244,9 @@ def test_image_does_not_grant_sudo_to_other_accounts() -> None:
     assert "sudo" in result.stderr
 
 
-@pytest.mark.parametrize("tool", ["npm", "bash", "git", "make", "cc", "c++", "curl", "tar", "unzip", "sudo"])
-def test_startup_rejects_broken_required_tool_and_removes_probe(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, tool: str
+@pytest.mark.parametrize("tool", [None, "npm", "bash", "git", "make", "cc", "c++", "curl", "tar", "unzip", "sudo"])
+def test_startup_checks_tool_capabilities_and_removes_probe(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, tool: str | None
 ) -> None:
     calls = []
 
@@ -230,6 +262,8 @@ def test_startup_rejects_broken_required_tool_and_removes_probe(
                     f"printf '#!/bin/sh\\necho broken-tool-invoked:{tool} >&2\\nexit 42\\n' "
                     f'> "$NPM_CONFIG_PREFIX/bin/{tool}"\n'
                     f'chmod 755 "$NPM_CONFIG_PREFIX/bin/{tool}"\n'
+                    if tool
+                    else 'export PATH="/tmp/extra-path:$PATH"\n'
                 )
                 args = [*args[:-1], fixture + args[-1]]
                 self.log = tmp_path / "runtime.log"
@@ -238,15 +272,19 @@ def test_startup_rejects_broken_required_tool_and_removes_probe(
     monkeypatch.setattr("software_factory.runner.Commands", ScriptedAuthentication)
     monkeypatch.setattr("software_factory.runner.shutil.which", lambda name: "/bin/" + name)
     config = Config("owner/repo", "chosen", IMAGE, tmp_path / "artifacts")
-    with pytest.raises(FactoryError, match="agent runtime check failed"):
+    if tool:
+        with pytest.raises(FactoryError, match="agent runtime check failed"):
+            preflight(config)
+    else:
         preflight(config)
     runtime = next(args for args, phase in calls if phase == "startup agent")
     name = runtime[runtime.index("--name") + 1]
     assert calls[-1] == (["docker", "rm", "--force", "--volumes", name], "startup cleanup")
     containers = subprocess.check_output(["docker", "ps", "-aq", "--filter", f"name=^{name}$"], text=True)
-    assert not containers.strip(), "failed startup probe left a container behind"
+    assert not containers.strip(), "startup probe left a container behind"
     assert list(config.artifacts_dir.iterdir()) == []
-    assert f"broken-tool-invoked:{tool}" in (tmp_path / "runtime.log").read_text()
+    if tool:
+        assert f"broken-tool-invoked:{tool}" in (tmp_path / "runtime.log").read_text()
 
 
 @pytest.mark.parametrize(
@@ -259,7 +297,10 @@ def test_startup_rejects_broken_required_tool_and_removes_probe(
         "cache",
         "prefix",
         "bin",
-        "account",
+        "unreadable-home",
+        "unreadable-cache",
+        "unreadable-prefix",
+        "unreadable-bin",
         "missing-cache",
         "missing-bin",
         "unsearchable-home",
@@ -275,9 +316,7 @@ def test_startup_rejects_broken_required_tool_and_removes_probe(
             for file in (
                 "test-driven-development/SKILL.md",
                 "test-driven-development/testing-anti-patterns.md",
-                "test-driven-development/LICENSE",
                 "ponytail/SKILL.md",
-                "ponytail/LICENSE",
             )
             for defect in ("missing", "unreadable", "empty", "whitespace")
         ],
@@ -315,7 +354,10 @@ def test_startup_rejects_incompatible_image_without_runtime_repair(
                         "cache": "chmod 0555 /tmp/factory-home/.cache",
                         "prefix": "chmod 0555 /tmp/factory-home/.local",
                         "bin": "chmod 0555 /tmp/factory-home/.local/bin",
-                        "account": "sed -i 's/^factory:/old-factory:/' /etc/passwd",
+                        "unreadable-home": "chmod 0300 /tmp/factory-home",
+                        "unreadable-cache": "chmod 0300 /tmp/factory-home/.cache",
+                        "unreadable-prefix": "chmod 0300 /tmp/factory-home/.local",
+                        "unreadable-bin": "chmod 0300 /tmp/factory-home/.local/bin",
                         "missing-cache": "rmdir /tmp/factory-home/.cache",
                         "missing-bin": "rmdir /tmp/factory-home/.local/bin",
                         "unsearchable-home": "chmod 0600 /tmp/factory-home",

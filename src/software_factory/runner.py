@@ -24,31 +24,28 @@ RUNTIME_CHECK = """set -eu
  test -f /opt/software-factory/pi/AGENTS.md
  grep -q '[^[:space:]]' /opt/software-factory/pi/AGENTS.md
  for file in test-driven-development/SKILL.md test-driven-development/testing-anti-patterns.md \
-             test-driven-development/LICENSE ponytail/SKILL.md ponytail/LICENSE; do
+             ponytail/SKILL.md; do
    test -f "/opt/software-factory/pi/skills/$file"
    grep -q '[^[:space:]]' "/opt/software-factory/pi/skills/$file"
  done
  test "$(id -u)" = 2000
  test "$(id -g)" = 2000
- test "$(id -un)" = factory
- test "$(id -gn)" = factory
- test "$(getent passwd factory | cut -d: -f3-4)" = 2000:2000
- test "$HOME" = /tmp/factory-home
- test "$(stat -c %u:%g "$HOME")" = 2000:2000
+ test -d "$HOME"
+ test -r "$HOME"
  test -w "$HOME"
  test -x "$HOME"
- test "$XDG_CACHE_HOME" = "$HOME/.cache"
  test -d "$XDG_CACHE_HOME"
+ test -r "$XDG_CACHE_HOME"
  test -w "$XDG_CACHE_HOME"
  test -x "$XDG_CACHE_HOME"
- test "$NPM_CONFIG_PREFIX" = "$HOME/.local"
  test -d "$NPM_CONFIG_PREFIX"
+ test -r "$NPM_CONFIG_PREFIX"
  test -w "$NPM_CONFIG_PREFIX"
  test -x "$NPM_CONFIG_PREFIX"
  test -d "$NPM_CONFIG_PREFIX/bin"
+ test -r "$NPM_CONFIG_PREFIX/bin"
  test -w "$NPM_CONFIG_PREFIX/bin"
  test -x "$NPM_CONFIG_PREFIX/bin"
- case "$PATH" in "$NPM_CONFIG_PREFIX/bin":*) ;; *) exit 1 ;; esac
  sudo -n sh -ec 'test "$(id -u)" = 0; test "$HOME" = /root'
  test "$(uname -m)" = aarch64
  for tool in pi node npm docker python uv bash git make cc c++ curl tar; do "$tool" --version >/dev/null; done
