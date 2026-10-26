@@ -63,7 +63,13 @@ assert os.stat('/var/run/docker.sock').st_gid in os.getgroups()
 if '--list-models' in sys.argv:
     print('github-copilot chosen 128k 4k')
 else:
+    home = pathlib.Path(os.environ['PI_CODING_AGENT_DIR'])
+    instructions = (home / 'AGENTS.md').read_bytes()
+    assert instructions == pathlib.Path('/opt/software-factory/pi/AGENTS.md').read_bytes()
+    assert b'Do not publish, commit, or push' in instructions
+    assert '--no-context-files' not in sys.argv
     prompt = sys.stdin.read()
+    assert 'Do not publish, commit, or push' not in prompt
     task = json.loads(prompt.split('Task snapshot:\\n', 1)[1])
     assert task['title'] == 'implement fixture'
     assert '--model' in sys.argv and sys.argv[sys.argv.index('--model')+1] == 'chosen'

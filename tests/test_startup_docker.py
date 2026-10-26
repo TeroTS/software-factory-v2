@@ -58,8 +58,10 @@ def test_shared_image_has_pinned_native_baseline_and_no_credentials() -> None:
     test -s /etc/ssl/certs/ca-certificates.crt
     test ! -e /root/.pi/agent/auth.json
     test ! -e /root/.config/gh/hosts.yml
+    printf '\\nFACTORY_INSTRUCTIONS\\n'
+    cat /opt/software-factory/pi/AGENTS.md
     """
-    subprocess.run(
+    result = subprocess.run(
         [
             "docker",
             "run",
@@ -78,6 +80,75 @@ def test_shared_image_has_pinned_native_baseline_and_no_credentials() -> None:
         check=True,
         capture_output=True,
         text=True,
+        timeout=60,
+    )
+    assert result.stdout.partition("\nFACTORY_INSTRUCTIONS\n")[2] == (ROOT / "agent/pi/AGENTS.md").read_text()
+
+
+def test_pinned_pi_loads_factory_and_target_context_without_project_trust() -> None:
+    script = """
+import assert from 'node:assert/strict';
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { DefaultResourceLoader, SettingsManager } from
+    '/usr/local/lib/node_modules/@earendil-works/pi-coding-agent/dist/index.js';
+
+const root = mkdtempSync('/tmp/factory-context-');
+try {
+    const agentDir = join(root, 'agent');
+    const cwd = join(root, 'target');
+    mkdirSync(agentDir);
+    mkdirSync(join(cwd, '.pi'), { recursive: true });
+    const baked = '/opt/software-factory/pi/AGENTS.md';
+    copyFileSync(baked, join(agentDir, 'AGENTS.md'));
+    writeFileSync(join(cwd, 'AGENTS.md'), 'target instructions');
+    writeFileSync(join(cwd, '.pi', 'settings.json'), JSON.stringify({ defaultModel: 'untrusted-model' }));
+    writeFileSync(join(cwd, '.pi', 'SYSTEM.md'), 'untrusted system prompt');
+    writeFileSync(join(cwd, '.pi', 'APPEND_SYSTEM.md'), 'untrusted appended prompt');
+    const settingsManager = SettingsManager.create(cwd, agentDir, { projectTrusted: false });
+    const loader = new DefaultResourceLoader({ cwd, agentDir, settingsManager,
+        noExtensions: true, noSkills: true, noPromptTemplates: true, noThemes: true });
+    await loader.reload();
+    const factory = { path: join(agentDir, 'AGENTS.md'), content: readFileSync(baked, 'utf8') };
+    assert.deepEqual(loader.getAgentsFiles().agentsFiles, [factory,
+        { path: join(cwd, 'AGENTS.md'), content: 'target instructions' }]);
+    assert.equal(settingsManager.getDefaultModel(), undefined);
+    assert.equal(loader.getSystemPrompt(), undefined);
+    assert.deepEqual(loader.getAppendSystemPrompt(), []);
+    assert.deepEqual(loader.getExtensions().extensions, []);
+    assert.deepEqual(loader.getSkills().skills, []);
+    writeFileSync(join(cwd, 'AGENTS.override.md'), 'target override');
+    await loader.reload();
+    assert.deepEqual(loader.getAgentsFiles().agentsFiles, [factory,
+        { path: join(cwd, 'AGENTS.override.md'), content: 'target override' }]);
+} finally {
+    rmSync(root, { recursive: true, force: true });
+}
+"""
+    subprocess.run(
+        [
+            "docker",
+            "run",
+            "--rm",
+            "--interactive",
+            "--pull=never",
+            "--platform",
+            "linux/arm64",
+            "--network",
+            "none",
+            "--env",
+            "PI_OFFLINE=1",
+            "--env",
+            "PI_TELEMETRY=0",
+            "--entrypoint",
+            "node",
+            IMAGE,
+            "--input-type=module",
+        ],
+        input=script,
+        capture_output=True,
+        text=True,
+        check=True,
         timeout=60,
     )
 
@@ -163,9 +234,13 @@ def test_startup_rejects_broken_required_tool_and_removes_probe(
         "unsearchable-cache",
         "unsearchable-prefix",
         "unsearchable-bin",
+        "missing-instructions",
+        "unreadable-instructions",
+        "empty-instructions",
+        "whitespace-instructions",
     ],
 )
-def test_startup_rejects_incompatible_identity_or_home_without_runtime_repair(
+def test_startup_rejects_incompatible_image_without_runtime_repair(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, defect: str
 ) -> None:
     names = []
@@ -194,6 +269,10 @@ def test_startup_rejects_incompatible_identity_or_home_without_runtime_repair(
                     "unsearchable-cache": "chmod 0600 /tmp/factory-home/.cache",
                     "unsearchable-prefix": "chmod 0600 /tmp/factory-home/.local",
                     "unsearchable-bin": "chmod 0600 /tmp/factory-home/.local/bin",
+                    "missing-instructions": "rm /opt/software-factory/pi/AGENTS.md",
+                    "unreadable-instructions": "chmod 000 /opt/software-factory/pi/AGENTS.md",
+                    "empty-instructions": ": > /opt/software-factory/pi/AGENTS.md",
+                    "whitespace-instructions": "printf ' \\n\\t' > /opt/software-factory/pi/AGENTS.md",
                 }[defect]
                 super().run(
                     ["docker", "exec", "--user", "0:0", names[0], "sh", "-ec", mutation],

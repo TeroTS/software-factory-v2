@@ -1,4 +1,5 @@
 import json
+import subprocess
 import time
 from pathlib import Path
 from unittest.mock import Mock
@@ -7,7 +8,7 @@ import pytest
 
 from software_factory.config import Config
 from software_factory.process import FactoryError
-from software_factory.runner import Runner, preflight
+from software_factory.runner import RUNTIME_CHECK, Runner, preflight
 
 IMAGE_ID = "sha256:" + "a" * 64
 
@@ -228,6 +229,21 @@ def test_startup_checks_baked_identity_tools_home_and_sudo_without_user_initiali
     assert "--user" not in probe and "--env" not in probe
     assert "agent user configuration" not in [call.args[1] for call in calls]
     assert calls[-1].args[1] == "startup cleanup"
+
+
+@pytest.mark.parametrize("contents", [None, "", " \n\t", "factory instructions\n"])
+def test_startup_probe_requires_readable_nonempty_factory_instructions(tmp_path: Path, contents: str | None) -> None:
+    path = tmp_path / "AGENTS.md"
+    if contents is not None:
+        path.write_text(contents)
+    check = RUNTIME_CHECK.split(' test "$(id -u)"', 1)[0]
+    assert "/opt/software-factory/pi/AGENTS.md" in check
+    result = subprocess.run(
+        ["sh", "-ec", check.replace("/opt/software-factory/pi/AGENTS.md", str(path))],
+        capture_output=True,
+        text=True,
+    )
+    assert (result.returncode == 0) == bool(contents and contents.strip())
 
 
 def test_startup_preserves_previous_artifacts(startup) -> None:

@@ -1,0 +1,60 @@
+ 1. Move standing implementation instructions out of Python
+    Move reusable instructions from src/software_factory/sandbox_agent.py into factory-owned Pi AGENTS.md context.
+    Version-control them and bake them into the shared image; pass issue-specific content separately.
+
+ 2. Add TDD and Ponytail skills
+    Bundle pinned, approved skills in the shared image and explicitly load them during implementation. Require
+    test-first development and the smallest complete solution.
+
+ 3. Generate and publish tickets from SPEC.md
+    Add a planning skill and fixed issue template covering stable story IDs, source-spec revision, scope, acceptance
+    criteria, verification, and dependencies. Publish approved plans through a deterministic script with validation,
+    dry-run, duplicate detection, and safe partial-publication handling. Reject dependency cycles; dependent tickets
+    wait until prerequisite changes are merged.
+
+ 4. Add label-based routing and parallel agents
+    Retain agent:implement as the execution trigger and add exactly one worker-routing label, such as agent:worker-0.
+    Each runner processes only issues with its matching route and the trigger, consuming the trigger before execution
+    while retaining the route. Block conflicting routes and unmet dependencies. Start with manual routing; defer
+    automatic scheduling.
+
+ 5. Add agent-based PR review and controlled merge
+    Start with advisory reviews checking requirements, correctness, tests, and safety against the exact PR head.
+    Require fresh review after new commits. Introduce automatic merge only after defining eligibility, required CI,
+    approval rules, and permissions.
+
+ 6. Deploy the factory to AWS EC2 with release and rollback procedures
+    Provide reproducible host preparation and supervised runner operation, initially on one instance. Version the
+    runner, shared image, instructions, and skills together. Document health checks, upgrades, draining, and rollback.
+    Keep deployment of generated applications outside this scope.
+
+ 7. Define remote authentication, permissions, and secret lifecycle
+    Establish persistent, unattended GitHub and Pi/Copilot authentication, including stop/start behavior, refresh,
+    expiry, rotation, and revocation. Evaluate GitHub App credentials for repository operations separately from
+    Copilot authentication. Separate implementation, review, merge, and deployment permissions; never bake credentials
+    into images.
+
+ 8. Add implementation observability and usage reporting
+    Expose run identity, current phase, elapsed time, outcomes, safe failure reasons, and available token/usage
+    metrics. Distinguish measured usage from cost estimates and provider quotas. Keep detailed diagnostics private and
+    redact credentials.
+
+ 9. Add sanitized Slack lifecycle notifications
+    Send claimed → setup → implementation → verification → cleanup → PR events with elapsed time, available usage,
+    safe failure reasons, and relevant links. No questions, interactive replies, or raw transcripts. Slack delivery
+    failures must not block execution or publication.
+
+ 10. Add safe work claiming and duplicate prevention
+     Prevent duplicate execution during simultaneous polling, crashes, routing changes, or ambiguous GitHub responses.
+     Enforce one active runner per worker identity and define claim expiry and release rules. Preserve create-only
+     branch publication; routing labels are not an atomic lock.
+
+ 11. Add operator controls and failure-recovery procedures
+     Support pausing new work, draining workers, stopping active runs with bounded cleanup, and inspecting stuck runs
+     or orphaned resources. Keep retries explicit and fresh; do not automatically resume retained workspaces or
+     blindly repeat uncertain writes.
+
+ 12. Add cost, concurrency, and resource safeguards
+     Enforce agreed concurrency, execution-time, and resource limits. Add usage/budget alerts, disk-space monitoring,
+     an explicit diagnostic-retention policy, and a kill switch for new work. Do not present token estimates as exact
+     billing.

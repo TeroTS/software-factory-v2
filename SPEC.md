@@ -5,7 +5,7 @@ Source: [DECISIONS.md](DECISIONS.md)
 ## Summary
 - Migrate the autonomous coding factory from arbitrary-host-user initialization to one fixed-identity Linux deployment. Use Ubuntu Server 24.04 LTS ARM64 and account/group `factory`, UID/GID `2000:2000`, on both the host and shared agent image.
 - The persistent Lima VM on Apple Silicon is the only deployment/acceptance environment. The runner and Docker engine execute inside Linux, with execution data on its native filesystem; no separate production-like host is required.
-- This backlog covers only the migration, not previously delivered features or unrelated future work. Only [the current slice](docs/slices/current-slice.md) records implementation state and verification evidence. Reconcile affected contracts before production changes. Domain names follow [CONTEXT.md](CONTEXT.md).
+- This backlog covers the migration and the approved factory-owned instruction extraction (US-11), not other previously delivered features or unrelated future work. Only [the current slice](docs/slices/current-slice.md) records implementation state and verification evidence. Reconcile affected contracts before production changes. Domain names follow [CONTEXT.md](CONTEXT.md).
 - Docker access grants effective engine/host control. Fixed identity and limited ordinary mounts are not security isolation. Preserve existing first-pass behavior, credential handling, cleanup/publication safeguards, and human review requirements from DECISIONS.md.
 
 ## Goals
@@ -97,6 +97,25 @@ Acceptance criteria:
 
 Deferred follow-ups:
 - None within this migration.
+
+### US-11: Load standing implementation instructions from the shared image
+Primary actor: Operator
+
+Trigger: The operator builds the updated shared agent image and starts the runner.
+
+Happy-path action: Process an issue using factory-owned Pi context and a separate immutable task snapshot.
+
+Visible outcome: Pi receives the version-controlled standing instructions alongside target repository context, without embedding those instructions in the Python task prompt.
+
+Authoritative state transition: Compatible shared image and captured issue → implementation with factory context and separate issue data.
+
+Acceptance criteria:
+- Maintain the reusable implementation instructions in `agent/pi/AGENTS.md` and bake them into `/opt/software-factory/pi/AGENTS.md`. Preserve existing rules; use the fixed factory identity terminology. Do not add skills or new implementation policies.
+- Copy the baked file into each invocation's private temporary Pi agent directory, alongside existing ephemeral credential/model configuration. Load factory context alongside, not instead of, target repository context. Never write factory instructions into the target workspace.
+- Keep the stdin task prompt limited to the invocation request, immutable snapshot, and existing optional verification-feedback data. Preserve that interface without enabling repair attempts.
+- Missing, unreadable, or empty factory instructions block startup with rebuild/restart guidance before polling. The wrapper also fails safely if instructions become unavailable; do not silently invoke Pi without them.
+- Preserve exact-model Copilot selection, stdin-only credentials, nonpersistent sessions, disabled discovered resources/trust-gated project configuration, original deadline, first-pass execution, cleanup, and publication gates. No TOML fields, dependencies, or automatic image build/pull are added.
+- Test wrapper context/data separation, credential cleanup and failures, image content/startup rejection, and actual pinned Pi context loading without a provider call. Run existing verification and native image/execution regressions against an explicitly rebuilt image when operator-authorized.
 
 ## Open Questions
 - No unresolved choice among OS/architecture, fixed identity, VM tool, or installation sources. Local allocation/image pins belong in the repository-maintained Lima configuration; provisioning source-verification evidence belongs in the [current slice](docs/slices/current-slice.md). Acceptance is local-VM-only, without a cloud validation claim.

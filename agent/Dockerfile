@@ -44,6 +44,9 @@ RUN apt-get update \
     && visudo -cf /etc/sudoers.d/factory \
     && rm -rf /var/lib/apt/lists/*
 
+# Keep factory instructions outside the target workspace and the writable container home.
+COPY pi/AGENTS.md /opt/software-factory/pi/AGENTS.md
+
 ENV UV_LINK_MODE=copy \
     HOME=/tmp/factory-home \
     XDG_CACHE_HOME=/tmp/factory-home/.cache \

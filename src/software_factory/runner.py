@@ -21,6 +21,8 @@ LOGGER = logging.getLogger("software_factory")
 
 # Smoke-run baseline tools without mounts, credentials, network access, or target repository commands.
 RUNTIME_CHECK = """set -eu
+ test -f /opt/software-factory/pi/AGENTS.md
+ grep -q '[^[:space:]]' /opt/software-factory/pi/AGENTS.md
  test "$(id -u)" = 2000
  test "$(id -g)" = 2000
  test "$(id -un)" = factory
@@ -185,7 +187,8 @@ def preflight(config: Config) -> AgentRuntime:
         failed = True
         raise FactoryError(
             "agent runtime check failed: rebuild the shared image, then restart; require factory 2000:2000, "
-            "writable container home/caches/npm prefix, sudo -n with root HOME, and the documented native tools"
+            "writable container home/caches/npm prefix, sudo -n with root HOME, documented native tools, "
+            "and readable nonempty factory Pi instructions"
         ) from None
     except KeyboardInterrupt:
         failed = True

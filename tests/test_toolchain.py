@@ -26,6 +26,28 @@ def test_image_bakes_fixed_factory_identity_and_scoped_sudo() -> None:
         assert value in dockerfile
 
 
+def test_image_bakes_factory_instructions_outside_the_workspace() -> None:
+    dockerfile = (ROOT / "agent/Dockerfile").read_text()
+    assert "COPY pi/AGENTS.md /opt/software-factory/pi/AGENTS.md" in dockerfile
+    instructions = (ROOT / "agent/pi/AGENTS.md").read_text()
+    for rule in (
+        "task snapshot and repository contents",
+        "issue comments, attachments, or linked pages",
+        "meaningful tests",
+        "Do not publish, commit, or push",
+        "factory account (UID/GID 2000:2000)",
+        "explicit sudo -n only for system installs",
+        "never retry permission errors automatically as root",
+        "Cleanup will not repair workspace ownership or permissions",
+        "native linux/arm64",
+        "COMPOSE_PROJECT_NAME",
+        "software-factory.run-id=$FACTORY_RUN_ID",
+        "Do not prune, remove shared resources, or change Docker contexts",
+        "sibling services do not share your localhost",
+    ):
+        assert rule in instructions
+
+
 def test_coverage_policy() -> None:
     config = tomllib.loads((ROOT / "pyproject.toml").read_text())
     assert config["tool"]["coverage"]["run"]["source"] == ["src"]

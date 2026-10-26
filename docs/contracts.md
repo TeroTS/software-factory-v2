@@ -173,6 +173,14 @@ Identity, retry, and backend selection are not operator TOML settings.
     discovered extensions, MCP, skills, prompt templates, themes, and trust-gated
     project configuration.
     Repository context may supply instructions, not additional security guarantees.
+  - Factory instructions: version-control standing implementation rules in
+    `agent/pi/AGENTS.md` and bake them into `/opt/software-factory/pi/AGENTS.md`.
+    Copy that file into each private temporary `PI_CODING_AGENT_DIR` as `AGENTS.md`
+    so Pi loads it alongside target repository context. Do not modify the target
+    workspace or replace Pi's default system prompt. Keep the invocation request,
+    immutable issue snapshot, and existing optional verification feedback separate
+    in stdin; the feedback interface does not enable repair attempts. No skills
+    or new implementation policies are introduced.
   - Credential input: host-resolved Copilot-only bearer with at least 20 minutes
     remaining, obtained privately through
     `pi auth print-bearer-token --provider github-copilot --min-expiry 20m`
@@ -184,7 +192,10 @@ Identity, retry, and backend selection are not operator TOML settings.
     configuration is removed after invocation. Do not supply the host OAuth
     refresh token or use another billing provider.
 - Ordering / Idempotency expectations: Startup resolves the compatible local
-  image ID without building/pulling. Each issue run gets a fresh agent container
+  image ID without building/pulling. Before polling, require readable, nonempty
+  factory instructions; missing/incompatible images require explicit rebuild/restart.
+  The wrapper must also reject unavailable/empty instructions before invoking Pi.
+  Each issue run gets a fresh agent container
   and workspace. Validate per-run identity/socket access before target setup;
   a host engine read or socket-free startup probe does not prove agent exec access.
   Setup precedes Pi, followed by verification under the original deadline. Pi

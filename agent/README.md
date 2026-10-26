@@ -60,6 +60,26 @@ Docker daemon, or target-specific dependencies in the image. Runtime engine acce
 grants effective engine/host control during issue execution; this image is not an isolation
 boundary.
 
+## Factory implementation context
+
+[`pi/AGENTS.md`](pi/AGENTS.md) is the version-controlled source of standing
+implementation instructions, baked into `/opt/software-factory/pi/AGENTS.md`.
+The Python wrapper copies it into each invocation's private temporary Pi agent
+directory as `AGENTS.md`, alongside ephemeral credential/model configuration.
+Pi loads this factory context alongside the target repository's context files;
+it does not replace target `AGENTS.md` or Pi's default system prompt. The wrapper
+sends the immutable issue snapshot separately through stdin, not embedded in the
+standing instructions. The temporary directory is removed after invocation.
+
+Rebuild the shared image explicitly and restart the runner after changing these
+instructions; running containers and the session's immutable image ID do not
+adopt source-file edits. Startup rejects missing, unreadable, or empty instruction
+files with rebuild/restart guidance. The wrapper also fails rather than invoking
+Pi without readable, nonempty factory instructions. No runtime fallback or target
+workspace copy is provided. Repository context remains untrusted model input,
+not an enforcement mechanism. Skills and trust-gated project configuration remain
+disabled.
+
 ## Fixed-identity startup and migration
 
 Rebuild the image explicitly and restart the runner after upgrading. Startup
@@ -104,8 +124,11 @@ real application builds, ordinary Compose services, same-path sibling mounts,
 socket access, a target-installed tool, host-usable ordinary files without repair,
 and scoped cleanup.
 Pi/authentication/GitHub boundaries are scripted; no live provider request or
-GitHub write is made. macOS browser access to guest services requires a separate
-check; it cannot be inferred from Linux CI.
+GitHub write is made. A separate image test uses the pinned Pi resource loader
+without network access to verify factory and target context load together while
+untrusted project settings/system prompts stay disabled, including a target
+`AGENTS.override.md` that does not suppress factory context. macOS browser access
+to guest services requires a separate check; it cannot be inferred from Linux CI.
 
 New agents use the image's unmodified Docker executable directly; no runtime
 Docker-executable installation or relocation is needed. The fixed-identity
