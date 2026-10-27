@@ -5,8 +5,10 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from unittest.mock import Mock
 
 import pytest
+from tests_support import app_credentials
 
 from software_factory.config import Config
 from software_factory.process import Commands, FactoryError
@@ -249,12 +251,13 @@ def test_startup_checks_tool_capabilities_and_removes_probe(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, tool: str | None
 ) -> None:
     calls = []
+    monkeypatch.setattr("software_factory.runner.GitHubApp.load", Mock(return_value=Mock()))
 
     class ScriptedAuthentication(Commands):
         def run(self, args, phase, **kwargs):
             calls.append((args, phase))
             if phase == "GitHub authentication":
-                return ""
+                return json.dumps({"full_name": "owner/repo"})
             if phase == "Copilot authentication":
                 return f"proxy-ep=proxy.business.githubcopilot.com;exp={int(time.time()) + 1800}"
             if phase == "agent runtime":
@@ -326,11 +329,12 @@ def test_startup_rejects_incompatible_image_without_runtime_repair(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, defect: str
 ) -> None:
     names = []
+    monkeypatch.setattr("software_factory.runner.GitHubApp.load", Mock(return_value=Mock()))
 
     class IncompatibleImage(Commands):
         def run(self, args, phase, **kwargs):
             if phase == "GitHub authentication":
-                return ""
+                return json.dumps({"full_name": "owner/repo"})
             if phase == "Copilot authentication":
                 return f"proxy-ep=proxy.business.githubcopilot.com;exp={int(time.time()) + 1800}"
             if phase == "startup agent":
@@ -387,19 +391,23 @@ def test_startup_rejects_incompatible_image_without_runtime_repair(
 
 
 def test_operator_starts_real_cli_with_shared_image_and_observes_idle_polling(tmp_path: Path) -> None:
+    home = tmp_path / "home"
     tools = tmp_path / "tools"
     tools.mkdir()
+    app_credentials(home, tools)
     marker = tmp_path / "github-calls"
     gh = tools / "gh"
     gh.write_text(
         f"#!{sys.executable}\n"
-        "import json, pathlib, sys\n"
+        "import json, os, pathlib, sys\n"
         f"path = pathlib.Path({str(marker)!r})\n"
         "with path.open('a') as log: log.write(json.dumps(sys.argv[1:]) + '\\n')\n"
-        "if sys.argv[1:3] == ['auth', 'status']: sys.exit(0)\n"
-        "assert '--method' in sys.argv and sys.argv[sys.argv.index('--method') + 1] == 'GET'\n"
-        "assert any('issues?state=open&labels=' in arg for arg in sys.argv)\n"
-        "print(json.dumps([[]]))\n"
+        "assert os.environ['GH_TOKEN'] == 'fixture-installation-token'\n"
+        "if 'repos/owner/repo' in sys.argv:\n"
+        "    print(json.dumps({'full_name':'owner/repo'}))\n"
+        "else:\n"
+        "    assert any('issues?state=open&labels=' in arg for arg in sys.argv)\n"
+        "    print(json.dumps([[]]))\n"
     )
     gh.chmod(0o755)
     pi = tools / "pi"
@@ -419,7 +427,12 @@ def test_operator_starts_real_cli_with_shared_image_and_observes_idle_polling(tm
         process = subprocess.Popen(
             [sys.executable, "-m", "software_factory", "--config", str(config)],
             cwd=ROOT,
-            env={**os.environ, "PATH": str(tools) + os.pathsep + os.environ["PATH"]},
+            env={
+                **os.environ,
+                "HOME": str(home),
+                "DOCKER_CONFIG": os.environ.get("DOCKER_CONFIG", str(Path.home() / ".docker")),
+                "PATH": str(tools) + os.pathsep + os.environ["PATH"],
+            },
             stdout=subprocess.DEVNULL,
             stderr=stderr,
         )
@@ -445,7 +458,7 @@ def test_operator_starts_real_cli_with_shared_image_and_observes_idle_polling(tm
     assert list(previous.parent.iterdir()) == [previous]
     assert (previous / "run.log").read_text() == "previous diagnostic\n"
     calls = [json.loads(line) for line in marker.read_text().splitlines()]
-    assert all(call[:2] == ["auth", "status"] or call[call.index("--method") + 1] == "GET" for call in calls)
+    assert all("--method" not in call or call[call.index("--method") + 1] == "GET" for call in calls)
     containers = subprocess.check_output(
         ["docker", "ps", "-aq", "--filter", "name=factory-startup-", "--filter", f"ancestor={image_id}"], text=True
     )

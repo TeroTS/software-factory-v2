@@ -20,21 +20,24 @@ sudo ./scripts/provision-host
 sudo ./scripts/provision-host --check
 ```
 
-Authentication remains manual. Provisioning failures report a private command-log
+Initial authentication is operator-controlled; provisioning does not authenticate.
+Provisioning failures report a private command-log
 path; inspect it without publishing transcripts. For HTTPS trust failures, obtain
 operator approval for the correct CA rather than disabling verification.
 
 Run inside the provisioned **Ubuntu 24.04 LTS ARM64 Lima guest** as `factory`,
 with effective UID/GID **2000:2000**. Root, other identities, other host operating
 systems/releases, and direct macOS runner execution are rejected before polling.
-Startup requires Git, authenticated GitHub CLI, authenticated host Pi/Copilot
-(tested Pi **1.3.0**), and a running **local native Linux ARM64** Docker engine.
+Startup requires Git, GitHub CLI, OpenSSL, curl, private GitHub App credentials,
+authenticated host Pi/Copilot (tested Pi **1.3.0**), and a running
+**local native Linux ARM64** Docker engine.
 Remote engines and factory-selected emulation fallbacks are unsupported. Docker
 must use an absolute local Unix socket endpoint. Keep the checkout and artifacts
 on the guest's Linux disk; do not execute from macOS shared folders.
 Explicit `DOCKER_CONTEXT` takes precedence over `DOCKER_HOST`; otherwise the host
 override or active context selects the engine. Authentication/access approval
-remains manual. Only one runner may operate on a configured repository; labels
+requires operator approval. Complete [authentication setup](#authentication)
+before starting. Only one runner may operate on a configured repository; labels
 are not a distributed lock.
 
 1. Log in as the provisioned factory account (for example, an administrator can
@@ -69,8 +72,8 @@ are not a distributed lock.
    ```
 
    Startup first validates the supported host and effective identity, then checks
-   artifact-root usability, host tools, local engine architecture, GitHub
-   authentication, Copilot bearer endpoint/lifetime, local image architecture,
+   artifact-root usability, host tools, local engine architecture, GitHub App
+   repository access, Copilot bearer endpoint/lifetime, local image architecture,
    and actual baked factory account/home/caches/npm prefix, native tools, and
    `sudo -n` with root HOME. The startup probe uses the image's default identity
    without runtime account initialization. Rebuild old/incompatible images and
@@ -112,6 +115,95 @@ are not a distributed lock.
    retains diagnostics, and exits **130**. Startup failures exit nonzero with safe
    stderr diagnostics. Failure/stop/restart never restores a trigger or resumes
    retained work. Unknown resources and hard-crash leftovers need manual inspection.
+
+## Authentication
+
+Run this setup **inside the VM as factory**, not as the default Lima login user:
+
+```sh
+sudo -iu factory
+cd "$HOME"
+id  # require 2000:2000
+```
+
+### GitHub App (one-time)
+
+1. In GitHub settings, open the installed App, record its App ID and installation
+   ID, and generate/download a private key. The installation must include the target
+   repository, with metadata read and contents/issues/pull requests read/write.
+   Do not grant workflow-write permission.
+2. Transfer the key privately to
+   `/home/factory/.config/software-factory/github-app.pem`. Keep it outside checkouts,
+   artifacts, images, and agent workspaces. Directory mode must be 0700 and key mode
+   0600, owned by factory; symlinks are rejected. Never paste key contents into chat.
+3. Create the sibling `github-app.json`, also mode 0600. For the approved
+   `factory-example` installation, its complete content is:
+
+   ```json
+   {"app_id": 5430144, "installation_id": 174237987}
+   ```
+
+   These IDs are not secrets. Use your own installation's IDs for another target.
+   The operator TOML still has exactly four fields; do not put credentials in it.
+
+The runner signs a short-lived App JWT with OpenSSL and requests an installation
+access token restricted to the configured repository and required permissions.
+Token exchange uses curl with an explicit Bearer header supplied over stdin;
+`gh`'s automatic token scheme is not suitable for App JWTs.
+API requests and trusted HTTPS Git share this identity; inherited personal tokens
+and saved personal `gh` login are not fallbacks. No `gh auth login` is required.
+Tokens stay in memory and explicit host subprocess environments, not Git URLs or
+arguments. Startup confirms repository access before polling. Local file checks
+and read-only access do not prove every remote write will succeed.
+
+### Pi/Copilot (one-time)
+
+1. Start `pi --no-extensions --no-mcp --no-skills --no-context-files --no-session`
+   from the factory home directory.
+2. Enter `/login`, choose GitHub Copilot, and follow the device/browser flow using
+   the approved GitHub identity (`TeroTS` for this installation). Open the supplied
+   URL on your Mac if the VM cannot open a browser. Do not send an implementation task.
+3. Exit Pi, then check without printing tokens:
+
+   ```sh
+   chmod 700 "$HOME/.pi/agent"
+   chmod 600 "$HOME/.pi/agent/auth.json"
+   pi auth check --provider github-copilot --no-extensions --no-mcp --no-context-files
+   ```
+
+Pi manages persistent login/refresh state in the factory home. Keep its default
+agent directory for both login and runner execution; do not authenticate as root
+or the default Lima user. A ready check is not a live inference/refresh acceptance
+check. The agent receives only the short-lived Copilot bearer over stdin.
+
+### Restart, expiry, rotation, and revocation
+
+- **Stop/start:** host files remain; GitHub tokens are reacquired after restart and
+  renewed before operations when at most 20 minutes remain. Pi performs supported
+  refresh. No interactive login is attempted by the runner.
+- **Unavailable/expired authorization:** operations fail safely without switching
+  accounts or blindly replaying writes. Active failures still attempt cleanup.
+  Stop the runner, fix access or log in to Pi again, then restart. Inspect uncertain
+  remote writes before explicitly reapplying an issue's trigger label.
+- **Planned App key rotation:** stop the runner and finish/clean active work;
+  generate and privately replace the host key, preserve ownership/modes, validate
+  the replacement, then revoke the old key in GitHub. Restart only after setup is
+  correct. Do not delete the old authorization before a replacement is available
+  unless responding to compromise.
+- **Emergency:** revoke the affected App key/installation or Copilot authorization
+  upstream, stop the runner/active agents, and inspect retained resources before
+  replacing credentials. Previously issued tokens may remain usable until expiry;
+  do not assume deleting a local file revokes them.
+- **Host replacement/backups:** explicitly enroll the replacement host. Do not copy
+  credentials through Git or restore failed workspaces as execution state. Treat
+  any host backup or downloaded key copy as secret-bearing operator storage.
+
+Private files are not encrypted storage. Docker access grants effective host
+control, so these credentials are not protected from a malicious Docker-enabled
+agent. App permissions also allow more than the runner intentionally does: branch
+protection/stronger permission separation are deferred for the MVP. The runner
+never merges or deploys and blocks `.github/workflows/` changes before commit.
+Live GitHub/Copilot tests still require separate operator approval.
 
 ## Shared image and target preparation
 

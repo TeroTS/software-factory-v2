@@ -23,6 +23,49 @@ def origin(tmp_path: Path) -> Path:
     return path
 
 
+def test_git_requests_fresh_app_environment_for_every_command(tmp_path: Path) -> None:
+    from unittest.mock import Mock
+
+    from software_factory.repository import Repository
+
+    commands = Mock()
+    auth = Mock()
+    auth.environment.side_effect = lambda budget, base: {**base, "GH_TOKEN": f"token-{auth.environment.call_count}"}
+    repo = Repository(tmp_path, commands, auth)
+    repo.git("fetch", "https://github.com/owner/repo.git")
+    assert auth.environment.call_count == 2
+    assert commands.run.call_args.kwargs["env"]["GH_TOKEN"] == "token-2"
+    assert "GH_TOKEN" not in repo.env, "do not freeze an expiring token in the repository environment"
+
+
+@pytest.mark.parametrize("change", ["add", "modify", "delete", "rename-out"])
+def test_workflow_changes_block_host_commit(origin: Path, tmp_path: Path, change: str) -> None:
+    from software_factory.process import Commands, FactoryError
+    from software_factory.repository import Repository
+
+    workflow = origin / ".github/workflows/check.yml"
+    workflow.parent.mkdir(parents=True)
+    workflow.write_text("original\n")
+    git(origin, "add", ".")
+    git(origin, "commit", "-m", "workflow baseline")
+    run = tmp_path / "run"
+    run.mkdir()
+    repo = Repository(run, Commands())
+    repo.checkout(str(origin), "main")
+    target = repo.workspace / ".github/workflows/check.yml"
+    if change == "delete":
+        target.unlink()
+    elif change == "rename-out":
+        target.rename(repo.workspace / "moved.yml")
+    else:
+        if change == "add":
+            target = target.with_name("new.yml")
+        target.write_text("changed\n")
+    with pytest.raises(FactoryError, match="workflow"):
+        repo.commit(1)
+    assert repo.git("rev-parse", "HEAD").strip() == git(origin, "rev-parse", "HEAD")
+
+
 def test_fresh_workspace_and_host_owned_metadata(origin: Path, tmp_path: Path) -> None:
     from software_factory.process import Commands, FactoryError
     from software_factory.repository import Repository

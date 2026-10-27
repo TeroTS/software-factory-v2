@@ -2,15 +2,17 @@
 import os
 from pathlib import Path
 
+from software_factory.auth import GitHubApp
 from software_factory.process import Commands, FactoryError
 
 
 # Manage a fresh checkout and host-side commits without loading repository-supplied Git settings or hooks.
 class Repository:
     # Create an exposed workspace and a separate, unexposed Git directory under the private run directory.
-    def __init__(self, directory: Path, commands: Commands) -> None:
+    def __init__(self, directory: Path, commands: Commands, auth: GitHubApp | None = None) -> None:
         self.directory = directory
         self.commands = commands
+        self.auth = auth
         self.workspace = directory / "workspace"
         self.workspace.mkdir()
         self.metadata = directory / "host.git"
@@ -51,7 +53,7 @@ class Repository:
             ],
             "git " + args[0],
             cwd=self.directory,
-            env=self.env,
+            env=self.auth.environment(self.commands, self.env) if self.auth is not None else self.env,
         )
 
     # Fetch the supplied branch from URL into the workspace and return its SHA; run no submodules or host scripts.
@@ -85,8 +87,11 @@ class Repository:
                 raise FactoryError("nested Git metadata is not allowed during host publication")
             dirs[:] = [name for name in dirs if Path(directory) / name not in ignored]
         self.git("add", "--all", "--", ".")
-        if not self.git("diff", "--cached", "--name-only", "--no-ext-diff"):
+        paths = self.git("diff", "--cached", "--name-only", "--no-ext-diff", "--no-renames", "-z")
+        if not paths:
             raise FactoryError("no changes produced")
+        if any(path == ".github/workflows" or path.startswith(".github/workflows/") for path in paths.split("\0")):
+            raise FactoryError("workflow-file changes are not allowed in this version; publication blocked")
         self.git("commit", "--no-gpg-sign", "-m", f"Implement issue #{number}")
         return self.git("rev-parse", "HEAD").strip()
 

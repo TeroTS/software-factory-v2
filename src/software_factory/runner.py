@@ -11,6 +11,7 @@ import uuid
 from dataclasses import dataclass
 from pathlib import Path
 
+from software_factory.auth import GitHubApp
 from software_factory.config import Config
 from software_factory.github import GitHub
 from software_factory.process import Commands, FactoryError
@@ -62,6 +63,7 @@ RUNTIME_CHECK = """set -eu
 class AgentRuntime:
     image_id: str
     docker_host: str
+    github_auth: GitHubApp | None = None
 
 
 # Resolve Docker's explicit-context/host precedence and reject nonlocal endpoints without exposing their contents.
@@ -126,7 +128,7 @@ def preflight(config: Config) -> AgentRuntime:
         raise FactoryError(
             "artifacts_dir must be a readable/writable directory; check its path and permissions"
         ) from None
-    for tool in ("git", "gh", "docker", "pi"):
+    for tool in ("git", "gh", "docker", "pi", "openssl", "curl"):
         if shutil.which(tool) is None:
             raise FactoryError(f"required tool unavailable: {tool}")
     commands = Commands()
@@ -137,7 +139,20 @@ def preflight(config: Config) -> AgentRuntime:
             raise ValueError
     except ValueError, TypeError, KeyError:
         raise FactoryError("Docker requires a native linux/arm64 local engine; emulation is unsupported") from None
-    commands.run(["gh", "auth", "status", "--hostname", "github.com"], "GitHub authentication", private=True)
+    auth = GitHubApp.load(config.repository)
+    try:
+        repository = json.loads(
+            commands.run(
+                ["gh", "api", "--hostname", "github.com", "repos/" + config.repository],
+                "GitHub authentication",
+                env=auth.environment(commands),
+                private=True,
+            )
+        )
+        if not isinstance(repository, dict) or repository.get("full_name", "").lower() != config.repository.lower():
+            raise ValueError
+    except ValueError, AttributeError:
+        raise FactoryError("GitHub App repository access could not be confirmed; inspect installation access") from None
     with tempfile.TemporaryDirectory(prefix=".startup-auth-", dir=config.artifacts_dir) as directory:
         bearer = copilot_bearer(commands, Path(directory))
         copilot_endpoint(bearer)
@@ -203,7 +218,7 @@ def preflight(config: Config) -> AgentRuntime:
             LOGGER.error("Cannot remove startup probe %s; inspect this container on the local engine", name)
             if not failed:
                 raise
-    return AgentRuntime(image_id, env["DOCKER_HOST"])
+    return AgentRuntime(image_id, env["DOCKER_HOST"], auth)
 
 
 # Keep one serial poller with no recovery state; the operator prevents simultaneous runners for this repository.
@@ -228,14 +243,14 @@ class Runner:
 
     # Discover labeled issues serially; retained diagnostics are never interpreted as resumable work.
     def poll_once(self) -> None:
-        github = GitHub(self.config.repository, Commands())
+        github = GitHub(self.config.repository, Commands(), self.runtime.github_auth)
         for number in github.discover():
             self.process_issue(number)
 
     # Confirm duplicate/claim state, execute one first-pass run, and report failures without restoring the trigger.
     def process_issue(self, number: int) -> None:
         commands = Commands(deadline=time.monotonic() + 900)
-        github = GitHub(self.config.repository, commands)
+        github = GitHub(self.config.repository, commands, self.runtime.github_auth)
         claimed = False
         directory = None
         try:
@@ -278,7 +293,7 @@ class Runner:
     def execute(self, number: int, github: GitHub, commands: Commands, directory: Path) -> str:
         snapshot = github.snapshot(number)
         branch = github.default_branch()
-        repository = Repository(directory, commands)
+        repository = Repository(directory, commands, self.runtime.github_auth)
         url = f"https://github.com/{self.config.repository}.git"
         snapshot["base_commit"] = repository.checkout(url, branch)
         sandbox = Sandbox(self.runtime.image_id, self.runtime.docker_host, directory, commands)
@@ -313,7 +328,9 @@ class Runner:
         except (FactoryError, OSError) as error:
             reason = str(error) if isinstance(error, FactoryError) else "publication filesystem operation failed"
             # Observe uncertain publication once with a separate bounded read budget; never retry a write.
-            observer = GitHub(self.config.repository, Commands(deadline=time.monotonic() + 30))
+            observer = GitHub(
+                self.config.repository, Commands(deadline=time.monotonic() + 30), self.runtime.github_auth
+            )
             try:
                 existing = observer.open_pr(number)
                 state = (
@@ -337,7 +354,9 @@ class Runner:
             LOGGER.error("Retained private diagnostics: %s", directory)
         if claimed:
             try:
-                github = GitHub(self.config.repository, Commands(deadline=time.monotonic() + 30))
+                github = GitHub(
+                    self.config.repository, Commands(deadline=time.monotonic() + 30), self.runtime.github_auth
+                )
                 github.comment(number, "Failed: " + reason)
             except FactoryError, OSError:
                 LOGGER.error("GitHub failure reporting unavailable for issue #%s", number)

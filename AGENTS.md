@@ -27,7 +27,8 @@ GitHub holds durable coordination; no database, HTTP API, or hosted deployment e
 - `src/software_factory/__main__.py`, `config.py`: terminal CLI, signals, four-field TOML.
 - `runner.py`: native image/engine preflight, serial issue coordination, cleanup/publication gates.
 - `agent/`: factory-maintained pinned shared-image build definition and instructions.
-- `github.py`, `repository.py`: host GitHub CLI and trusted Git publication.
+- `auth.py`: private host GitHub App credentials and scoped token renewal.
+- `github.py`, `repository.py`: App-authenticated host GitHub CLI and trusted Git publication.
 - `process.py`: command deadlines, safe errors, private/redacted diagnostics.
 - `sandbox.py`, `sandbox_agent.py`: shared-image agent lifecycle, scoped cleanup, credentials/Pi/verification.
 - `tests/`: pytest unit, real local Git/process/Docker, scripted external-boundary CLI E2E;
@@ -64,8 +65,11 @@ GitHub holds durable coordination; no database, HTTP API, or hosted deployment e
 - Runner execution requires the provisioned Ubuntu 24.04 LTS ARM64 Linux host
   and effective factory UID/GID 2000:2000. Reject root/other IDs and unsupported
   hosts before claims; never switch accounts or elevate the host runner.
-  Git, authenticated `gh`, authenticated Pi/Copilot (tested Pi **1.3.0**), and
-  Docker Compose are required. Authentication/access approval is manual.
+  Git, `gh`, OpenSSL, curl, private host GitHub App credentials, authenticated Pi/Copilot
+  (tested Pi **1.3.0**), and Docker Compose are required. Initial authentication/
+  access approval is manual. Repository API and HTTPS Git use the same App identity,
+  never saved personal login or inherited-token fallback. Preserve private host-file
+  modes and scoped token renewal; credentials never belong in operator TOML.
 - The operator builds the shared `agent/Dockerfile` image before startup. Require
   a local native linux/arm64 engine/image and retain the resolved immutable image
   ID for the session. Bake factory 2000:2000, writable home/caches/npm prefix,
@@ -125,6 +129,9 @@ GitHub holds durable coordination; no database, HTTP API, or hosted deployment e
   the workspace. Deliberately inaccessible retained files and unknown resources/
   hard-crash leftovers need operator inspection. Service-private data should use
   disposable owned volumes; workspace-writing services need compatible permissions.
+- Block `.github/workflows/` changes before host commit/publication in this version;
+  do not request workflow-write permission. Branch protection and stronger permission
+  separation are deferred; do not claim App scopes prevent merging/deployment.
 - Preserve exact `factory/issue-<number>` PR/branch checks and create-only publication;
   the runner must not overwrite or delete remote branches. Uncertain writes require
   inspection, not blind retries. Human review/independent target CI remain required.

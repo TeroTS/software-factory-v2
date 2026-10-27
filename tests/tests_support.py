@@ -1,8 +1,41 @@
 import json
 import os
+import subprocess
+import sys
 from pathlib import Path
 
 IMAGE = os.environ.get("FACTORY_AGENT_IMAGE", "software-factory-agent:1.0.0")
+
+
+def app_credentials(home: Path, tools: Path) -> None:
+    directory = home / ".config/software-factory"
+    directory.mkdir(parents=True, mode=0o700)
+    config = directory / "github-app.json"
+    config.write_text(json.dumps({"app_id": 123, "installation_id": 456}))
+    config.chmod(0o600)
+    key = directory / "github-app.pem"
+    subprocess.run(
+        ["openssl", "genpkey", "-algorithm", "RSA", "-pkeyopt", "rsa_keygen_bits:2048", "-out", str(key)],
+        capture_output=True,
+        check=True,
+    )
+    key.chmod(0o600)
+    curl = tools / "curl"
+    curl.write_text(
+        f"#!{sys.executable}\n"
+        "import datetime, json, os, sys\n"
+        "settings = {k: json.loads(v) for k,v in (line.split(' = ',1) for line in sys.stdin.read().splitlines())}\n"
+        "assert settings['url'] == 'https://api.github.com/app/installations/456/access_tokens'\n"
+        "assert settings['header'].startswith('Authorization: Bearer ')\n"
+        "assert len(settings['header'].split('.')) == 3\n"
+        "assert 'GH_TOKEN' not in os.environ\n"
+        "assert json.loads(settings['data'])['repositories'] == ['repo']\n"
+        "assert sys.argv[1] == '--disable' and not any('Bearer' in arg for arg in sys.argv)\n"
+        "print(json.dumps({'token':'fixture-installation-token',\n"
+        "    'expires_at':(datetime.datetime.now(datetime.UTC) + datetime.timedelta(hours=1)).isoformat(),\n"
+        "    'permissions':{'contents':'write','issues':'write','pull_requests':'write','metadata':'read'}}))\n"
+    )
+    curl.chmod(0o755)
 
 
 def target_repository(workspace: Path) -> None:

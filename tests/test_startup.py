@@ -18,7 +18,11 @@ IMAGE_ID = "sha256:" + "a" * 64
 def startup(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     config = Config("owner/repo", "chosen", "agent:v1", tmp_path / "artifacts")
     commands = Mock()
+    auth = Mock()
+    auth.environment.return_value = {"GH_TOKEN": "installation-only"}
+    monkeypatch.setattr("software_factory.runner.GitHubApp.load", Mock(return_value=auth))
     responses = {
+        "GitHub authentication": json.dumps({"full_name": "owner/repo"}),
         "Docker context": json.dumps([{"Endpoints": {"docker": {"Host": "unix:///var/run/docker.sock"}}}]),
         "Docker readiness": json.dumps({"OSType": "linux", "Architecture": "aarch64"}),
         "agent image": json.dumps([{"Id": IMAGE_ID, "Os": "linux", "Architecture": "arm64"}]),
@@ -64,8 +68,39 @@ def test_startup_resolves_local_image_and_checks_execution_without_claims(startu
     assert "linux/arm64" in probe.args[0]
     assert not any("mount" in arg or arg == "-v" for arg in probe.args[0])
     for command in calls:
-        assert "GH_TOKEN" not in command.kwargs.get("env", {})
+        if command.args[1] != "GitHub authentication":
+            assert "GH_TOKEN" not in command.kwargs.get("env", {})
     assert not any("pull" == arg or "build" == arg for call in calls for arg in call.args[0])
+
+
+def test_startup_uses_app_repository_access_not_personal_login_status(startup) -> None:
+    config, commands, _ = startup
+    runtime = preflight(config)
+    assert runtime.github_auth is not None
+    runtime.github_auth.environment.assert_called_once_with(commands)
+    call = next(call for call in commands.run.call_args_list if call.args[1] == "GitHub authentication")
+    assert call.args[0] == ["gh", "api", "--hostname", "github.com", "repos/owner/repo"]
+    assert call.kwargs["env"] == {"GH_TOKEN": "installation-only"}
+    assert call.kwargs["private"] is True
+
+
+@pytest.mark.parametrize("response", ["not-json", "null", "{}", '{"full_name":"other/repo"}'])
+def test_invalid_app_repository_readiness_blocks_startup(startup, response) -> None:
+    config, commands, responses = startup
+    responses["GitHub authentication"] = response
+    with pytest.raises(FactoryError, match="GitHub App"):
+        preflight(config)
+    assert "startup agent" not in [call.args[1] for call in commands.run.call_args_list]
+
+
+def test_missing_app_credentials_never_fall_back_to_saved_login(startup, monkeypatch) -> None:
+    config, commands, _ = startup
+    monkeypatch.setattr(
+        "software_factory.runner.GitHubApp.load", Mock(side_effect=FactoryError("GitHub App unavailable"))
+    )
+    with pytest.raises(FactoryError, match="GitHub App"):
+        preflight(config)
+    assert "GitHub authentication" not in [call.args[1] for call in commands.run.call_args_list]
 
 
 @pytest.mark.parametrize("architecture", ["arm64", "aarch64"])
@@ -75,7 +110,7 @@ def test_native_arm64_engine_aliases_are_supported(startup, architecture: str) -
     preflight(startup[0])
 
 
-@pytest.mark.parametrize("tool", ["git", "gh", "docker", "pi"])
+@pytest.mark.parametrize("tool", ["git", "gh", "docker", "pi", "openssl", "curl"])
 def test_missing_tools_fail_before_engine_calls(startup, monkeypatch, tool: str) -> None:
     config, commands, _ = startup
     monkeypatch.setattr("software_factory.runner.shutil.which", lambda name: None if name == tool else "/bin/tool")

@@ -12,6 +12,22 @@ def github(responses: list):
     return GitHub("owner/repo", commands), commands
 
 
+def test_api_uses_selected_app_environment_and_never_retries_uncertain_write() -> None:
+    from software_factory.github import GitHub
+    from software_factory.process import FactoryError
+
+    commands = Mock()
+    commands.run.side_effect = FactoryError("uncertain write")
+    auth = Mock()
+    auth.environment.return_value = {"GH_TOKEN": "installation-only"}
+    gh = GitHub("owner/repo", commands, auth)
+    with pytest.raises(FactoryError):
+        gh.comment(1, "status")
+    auth.environment.assert_called_once_with(commands)
+    assert commands.run.call_args.kwargs["env"] == {"GH_TOKEN": "installation-only"}
+    commands.run.assert_called_once()
+
+
 def test_discovery_paginates_and_excludes_pull_requests() -> None:
     gh, commands = github([[[{"number": 1}, {"number": 2, "pull_request": {}}], [{"number": 3}]]])
     assert gh.discover() == [1, 3]

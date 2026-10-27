@@ -29,9 +29,10 @@ lint, and tests with an **80%** line/branch coverage gate, including the Pi brid
 ## Run the factory
 
 Run on provisioned **Ubuntu 24.04 LTS ARM64** as **factory 2000:2000**, with local
-native Docker/Compose, Git, authenticated `gh`, and authenticated Pi/Copilot
-(tested Pi **1.3.0**). Direct macOS execution and remote Docker engines are unsupported.
-Follow [host provisioning](docs/operations.md#operator-setup) first.
+native Docker/Compose, Git, `gh`, OpenSSL, curl, GitHub App credentials, and authenticated
+Pi/Copilot (tested Pi **1.3.0**). Direct macOS execution and remote Docker engines are unsupported.
+Follow [host provisioning](docs/operations.md#operator-setup) and the
+[one-time authentication setup](docs/operations.md#authentication) first.
 
 As `factory`, from a factory-owned checkout on the Linux disk:
 
@@ -69,6 +70,9 @@ uv run --frozen python -m software_factory --config /absolute/path/to/factory.to
 - Ctrl-C/SIGTERM stops the runner and attempts bounded cleanup.
 - Failed runs retain private diagnostics; no automatic repair, requeue, or resume.
 - Rebuild the image and restart the runner after image, instruction, or skill changes.
+- GitHub uses the configured App installation, not personal `gh` login. Host credentials
+  survive runner stop/start; short-lived tokens renew automatically. Workflow-file
+  changes are blocked in this version.
 - **Docker access is not isolation:** the agent can effectively control the engine/host.
 
 ## Docker verification

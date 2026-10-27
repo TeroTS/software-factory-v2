@@ -41,6 +41,21 @@ def runtime(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     return runner, github, repo, sandbox, commands
 
 
+def test_selected_app_reaches_api_git_observation_and_failure_reporting(runtime) -> None:
+    from software_factory import runner as runner_module
+
+    runner, _, repo, _, _ = runtime
+    auth = Mock()
+    runner.runtime = AgentRuntime(runner.runtime.image_id, runner.runtime.docker_host, auth)
+    repo.push.side_effect = FactoryError("uncertain push")
+    github_constructor = runner_module.GitHub
+    repository_constructor = runner_module.Repository
+    runner.poll_once()
+    assert github_constructor.call_count >= 4
+    assert all(call.args[2] is auth for call in github_constructor.call_args_list)
+    assert repository_constructor.call_args.args[2] is auth
+
+
 def test_first_pass_claim_setup_verify_cleanup_publish_order(runtime) -> None:
     runner, github, repo, sandbox, commands = runtime
     events = Mock()

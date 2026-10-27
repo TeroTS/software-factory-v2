@@ -3,15 +3,17 @@ import json
 import re
 from urllib.parse import quote
 
+from software_factory.auth import GitHubApp
 from software_factory.process import Commands, FactoryError
 
 
 # Own issue discovery, exact duplicate checks, status comments, and draft PR creation without durable local state.
 class GitHub:
     # Bind the trusted repository name and command budget used by all requests.
-    def __init__(self, repository: str, commands: Commands) -> None:
+    def __init__(self, repository: str, commands: Commands, auth: GitHubApp | None = None) -> None:
         self.repository = repository
         self.commands = commands
+        self.auth = auth
 
     # Decode gh API JSON; return sanitized errors instead of raw remote content or uncertain success.
     def api(self, path: str, *, payload: dict | None = None, method: str = "GET", pages: bool = False) -> object:
@@ -28,7 +30,12 @@ class GitHub:
             args += ["--paginate", "--slurp"]
         if payload is not None:
             args += ["--input", "-"]
-        output = self.commands.run(args, "GitHub " + method, input=None if payload is None else json.dumps(payload))
+        output = self.commands.run(
+            args,
+            "GitHub " + method,
+            input=None if payload is None else json.dumps(payload),
+            env=self.auth.environment(self.commands) if self.auth is not None else None,
+        )
         try:
             return json.loads(output)
         except ValueError:

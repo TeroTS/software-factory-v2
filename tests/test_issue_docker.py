@@ -9,7 +9,7 @@ import time
 from pathlib import Path
 
 import pytest
-from tests_support import IMAGE, target_repository
+from tests_support import IMAGE, app_credentials, target_repository
 
 ROOT = Path(__file__).resolve().parents[1]
 pytestmark = [
@@ -44,8 +44,10 @@ def test_operator_labels_issue_and_observes_real_cli_docker_outcome(tmp_path: Pa
     subprocess.run([real_git, "-C", str(source), "commit", "-m", "fixture"], check=True, capture_output=True)
     remote = tmp_path / "origin.git"
     subprocess.run([real_git, "clone", "--bare", str(source), str(remote)], check=True, capture_output=True)
+    home = tmp_path / "home"
     tools = tmp_path / "tools"
     tools.mkdir()
+    app_credentials(home, tools)
     state_file = tmp_path / "github.json"
     # The operator applies the label to the scripted GitHub boundary; no authenticated service is contacted.
     state_file.write_text(json.dumps({"queued": True, "comments": [], "pr": None}))
@@ -55,12 +57,12 @@ def test_operator_labels_issue_and_observes_real_cli_docker_outcome(tmp_path: Pa
         + f"STATE={str(state_file)!r}\nREMOTE={str(remote)!r}\nGIT={real_git!r}\n"
         + f"STDERR={str(tmp_path / 'stderr')!r}\n"
         + """
-import json, pathlib, re, subprocess, sys
+import json, os, pathlib, re, subprocess, sys
 args = sys.argv[1:]
-if args[:2] == ['auth', 'status']: sys.exit(0)
 assert args[:3] == ['api', '--hostname', 'github.com']
+assert os.environ['GH_TOKEN'] == 'fixture-installation-token'
 path = args[3].removeprefix('repos/owner/repo').lstrip('/')
-method = args[args.index('--method')+1]
+method = args[args.index('--method')+1] if '--method' in args else 'GET'
 file = pathlib.Path(STATE)
 state = json.loads(file.read_text())
 payload = json.load(sys.stdin) if '--input' in args else None
@@ -81,7 +83,7 @@ elif path == 'issues/1/comments' and method == 'POST':
 elif path == 'issues/1':
     result = {'title':'implement fixture','body':None}
 elif path == '':
-    result = {'default_branch':'main'}
+    result = {'default_branch':'main','full_name':'owner/repo'}
 elif path == 'pulls' and method == 'POST':
     assert payload == {'title':'implement fixture','head':'factory/issue-1',
                        'base':'main','body':'Closes #1','draft':True}
@@ -108,6 +110,7 @@ print(json.dumps(result))
     git = tools / "git"
     git.write_text(
         f"#!{sys.executable}\nimport os, sys\n"
+        + "assert os.environ['GH_TOKEN'] == 'fixture-installation-token'\n"
         + f"args = [{real_git!r}, *sys.argv[1:]]\n"
         + f"args = [{str(remote)!r} if x == 'https://github.com/owner/repo.git' else x for x in args]\n"
         + f"os.execv({real_git!r}, args)\n"
@@ -129,7 +132,12 @@ print(json.dumps(result))
         process = subprocess.Popen(
             [sys.executable, "-m", "software_factory", "--config", str(config)],
             cwd=ROOT,
-            env={**os.environ, "PATH": str(tools) + os.pathsep + os.environ["PATH"]},
+            env={
+                **os.environ,
+                "HOME": str(home),
+                "DOCKER_CONFIG": os.environ.get("DOCKER_CONFIG", str(Path.home() / ".docker")),
+                "PATH": str(tools) + os.pathsep + os.environ["PATH"],
+            },
             stderr=stderr,
             stdout=subprocess.DEVNULL,
         )

@@ -168,7 +168,8 @@ against an agent with Docker engine access.
 
 `tests/test_startup_docker.py` executes these native tool checks and the real
 CLI startup-to-polling path against local Docker. Authentication/GitHub are
-scripted, and no issue is claimed. The probe runs without network access, mounts,
+scripted (including App token exchange with a disposable signing key), and no issue
+is claimed. The probe runs without network access, mounts,
 or credentials and is removed before polling. This is not acceptance of
 Docker-enabled issue execution by itself. The [Docker suite](../tests/test_docker_integration.py)
 and [CLI issue E2E](../tests/test_issue_docker.py) additionally use this image for
