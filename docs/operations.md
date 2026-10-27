@@ -46,22 +46,14 @@ not macOS shared folders.
    uv run --frozen python -m software_factory --config /absolute/path/to/factory.toml
    ```
 
-Startup checks host identity, tools, credentials, Docker, and the local image before
-polling. Docker must use a local native Linux ARM64 engine and an absolute Unix
-socket; `DOCKER_CONTEXT` takes precedence over `DOCKER_HOST` when explicitly set.
-
-The runner polls every 30 seconds and runs issues serially under a 900-second
-setup → Pi → verification → cleanup → publication deadline. It publishes only
-verified, nonempty changes as draft PRs. Workflow-file changes are blocked; target
-CI and human review remain required. It never merges or deploys.
-
-**Stop:** Ctrl-C/SIGTERM attempts bounded cleanup, retains failed diagnostics, and
-exits 130. Restart does not resume work or restore consumed trigger labels.
+Startup validates the host, credentials, and local image before polling. Docker
+requires a local native Linux ARM64 engine and absolute Unix socket; explicit
+`DOCKER_CONTEXT` overrides `DOCKER_HOST`. See [README](../README.md#run-the-factory)
+for runtime behavior and [recovery](#manual-inspection-and-recovery) for stopping/requeueing.
 
 ## Authentication
 
-Perform setup **inside the VM as factory**, not as the default Lima login user.
-Requires `gh`, OpenSSL, curl, and Pi **1.3.0**, supplied by host provisioning.
+Perform setup **inside the VM as factory**, using the provisioned tools.
 
 ### GitHub App (one-time)
 
@@ -81,9 +73,8 @@ Requires `gh`, OpenSSL, curl, and Pi **1.3.0**, supplied by host provisioning.
 
    Use the appropriate IDs for another installation. These IDs are not secrets.
 
-The runner acquires repository-scoped App tokens for both API calls and HTTPS Git;
-no personal `gh auth login` is required or used as fallback. App JWT exchange uses
-an explicit Bearer header over curl stdin, not `gh`'s automatic token scheme.
+The runner uses repository-scoped App tokens for API calls and HTTPS Git, never
+personal `gh auth login` or inherited-token fallback.
 
 ### Pi/Copilot (one-time)
 
@@ -104,9 +95,8 @@ an explicit Bearer header over curl stdin, not `gh`'s automatic token scheme.
    pi auth check --provider github-copilot --no-extensions --no-mcp --no-context-files
    ```
 
-Keep Pi's default agent directory for login and runner execution. Pi manages its
-persistent login/refresh state; the agent receives only a short-lived bearer over
-stdin. A `ready` result is not proof of live inference or unattended refresh.
+Keep Pi's default agent directory; Pi manages login/refresh state. A `ready`
+result is not proof of live inference or unattended refresh.
 
 ### Restart, expiry, rotation, and revocation
 
@@ -122,10 +112,9 @@ stdin. A `ready` result is not proof of live inference or unattended refresh.
 - **Backups/replacement hosts:** treat backups and downloaded keys as secret-bearing
   storage. Enroll a replacement explicitly; never restore workspaces as run state.
 
-**Docker access grants effective engine/host control, not isolation.** Private file
-permissions are not encryption or protection against a malicious Docker-enabled
-agent. App permissions also allow more than the runner uses; stronger server-side
-permission separation is deferred.
+**Docker access grants effective engine/host control, not isolation.** Private
+file modes do not protect against a malicious Docker-enabled agent; App scopes
+also allow more than the runner uses.
 
 ## Shared image and target preparation
 
@@ -157,48 +146,102 @@ repaired automatically.
 
 ## Diagnostics and safety
 
-The runner emits application logs as **JSON Lines on stderr**, with **INFO**
-progress enabled by default; WARNING/ERROR indicate problems. Logging does not
-write to stdout or create application log files. There is no format switch or
-logging configuration field in operator TOML.
-
-Every record includes a UTC `timestamp`, standard `level`, stable `event`, and
-readable `message`. Optional `repository`, `issue`, `phase`, `run_id` (the existing
-sandbox identity), and validated `pr_url` are included when available; missing
-context is omitted. Startup failures may lack repository/issue context.
-
-To collect logs, explicitly redirect stderr to an operator-managed path:
+Logs are **JSON Lines on stderr**, at **INFO** by default; see
+[README](../README.md#run-the-factory) for fields. To collect them:
 
 ```sh
 uv run --frozen python -m software_factory --config /absolute/path/to/factory.toml 2>factory.jsonl
 ```
 
-Logs are synchronous diagnostic output, not recovery state or proof of a remote
-operation. A slow destination can block; lost output is not recovered. Standard
-logging handler error handling applies. Keep collected logs private and manage
-their retention yourself; `2>` overwrites an existing file.
-
-Only selected fields and factory-controlled messages or sanitized failure
-summaries are serialized, not arbitrary extras, exception details, or transcripts.
-The formatter is not a general secret redactor. Command output stays in private
-run logs with known-secret redaction. New run directories use **0700**, logs
-**0600**. Never publish raw transcripts.
-[logging.ini](../logging.ini) supplies equivalent optional development defaults.
+Keep collected logs private and manage retention; `2>` overwrites existing files.
+A slow destination can block. Logs are not recovery state or proof of remote
+success. Command output stays in private run logs (**0700** directories, **0600**
+files), with known-secret redaction—not a guarantee. Never publish raw transcripts.
+[logging.ini](../logging.ini) provides optional development defaults.
 
 | Problem | Operator action |
 | --- | --- |
 | Startup/image failure | Check credentials, tools, and local image; rebuild/restart if incompatible. Inspect named `factory-startup-*` leftovers. |
-| Failed/interrupted run | Inspect retained workspace/logs and run-owned resources. Fix the cause, then explicitly reapply the trigger for a fresh run. |
-| Existing factory branch/PR | Inspect `factory/issue-<number>`; the runner never overwrites/deletes remote branches. Clean orphan branches manually before requeue. |
-| Uncertain push/PR result | Inspect remote state before retrying anything; a branch/PR may already exist. |
-| Cleanup or file-access failure | Inspect exact resource labels and required workspace permissions. Publication stays blocked; no automatic chown/chmod repair. |
+| Failed/interrupted run or uncertain publication | Follow [manual recovery](#manual-inspection-and-recovery) before requeueing. |
+| Cleanup or file-access failure | Publication is blocked. Inspect ownership labels and workspace permissions; no automatic chown/chmod repair. |
 
-Cleanup stops the agent/owned containers before networks/disposable volumes, using
-host-owned identities rather than target teardown scripts. Failure cleanup has a
-separate bounded budget, not extra coding/publication time. Hard-crash leftovers
-and unknown resources need manual inspection; **never use daemon-wide pruning**.
-Failed diagnostics remain until operator deletion; deleting them does not stop
-leftover containers. Successful diagnostics may be removed.
+## Manual inspection and recovery
+
+Run **inside the VM as factory**; replace example paths/IDs with inspected values.
+
+### 1. Stop and inspect
+
+Use Ctrl-C, or find the runner PID and send SIGTERM. Wait for exit before manual
+cleanup; allow its separate **60-second cleanup budget** plus failure reporting.
+
+```sh
+pgrep -af 'python -m software_factory'
+kill -TERM '<confirmed-runner-pid>'
+grep -F '"event": "run_started"' /absolute/path/to/factory.jsonl
+find /absolute/path/to/artifacts_dir -maxdepth 1 -type d -name 'issue-42-*' -print
+less /absolute/path/to/selected-run/run.log
+```
+
+The `run_started` record names the issue, `run_id`, and private directory. Use the
+configured artifacts path; keep diagnostics private and never execute retained
+workspace scripts on the host. A crash may leave containers running.
+
+### 2. Identify leftovers
+
+Use the **same local Docker endpoint selected at startup** (an explicit
+`DOCKER_CONTEXT` overrides `DOCKER_HOST`). If logs are missing, discover candidates
+and inspect labels/mounts to match them to the retained workspace:
+
+```sh
+docker container ls --all --filter 'name=factory-'
+docker container inspect '<candidate-id>' --format '{{json .Config.Labels}} {{json .Mounts}}'
+```
+
+Copy the confirmed issue-run identity below. List both labels separately (**OR**):
+
+```sh
+RUN_ID=factory-0123456789abcdef0123456789abcdef
+for LABEL in software-factory.run-id com.docker.compose.project; do
+    docker container ls --all --filter "label=$LABEL=$RUN_ID" --format '{{.ID}} {{.Names}} {{.Status}}'
+    docker network ls --filter "label=$LABEL=$RUN_ID"
+    docker volume ls --filter "label=$LABEL=$RUN_ID"
+done
+```
+
+Confirm ownership with `docker network inspect <id>` / `docker volume inspect <name>`.
+Names alone are not proof. Unknown/unlabeled resources need investigation.
+For `factory-startup-*` probes, confirm the exact container against startup logs;
+do not infer ownership of other resources from its name.
+
+### 3. Resolve publication on GitHub
+
+In the configured repository's web UI, inspect branch `factory/issue-42` and search
+PRs with `is:pr head:factory/issue-42`, including closed/merged results. Confirm the
+head repository and exact branch. A failed push/PR request may have succeeded;
+access errors mean **unknown**, not absent. Do not replay writes from the workspace.
+Preserve any existing PR for inspection; if only an orphan branch remains, inspect
+its commits before explicitly deciding whether to delete it for a fresh attempt.
+
+### 4. Clean and requeue
+
+With the runner stopped, remove **only confirmed owned resources**, agent first,
+then other containers, networks, and disposable volumes. Volume data is deleted:
+
+```sh
+docker container rm --force '<confirmed-agent-container-id>'
+docker container rm --force '<confirmed-other-owned-container-id>'
+docker network rm '<confirmed-owned-network-id>'
+docker volume rm '<confirmed-disposable-owned-volume-name>'
+```
+
+Repeat the exact-label listings and confirm the agent is absent. Errors require
+inspection, not broader deletion. Never prune the daemon, remove shared resources,
+or recursively chown/chmod the workspace. Keep failed diagnostics until explicit
+deletion; they are not resumed and deleting them does not clean Docker.
+
+Fix the cause and resolve branch/PR state before explicitly reapplying
+`agent:implement` for a fresh run. Inspect all trigger-labeled issues before
+[restarting](#operator-setup): every eligible issue can be picked up.
 
 ## Docker and CLI tests
 
