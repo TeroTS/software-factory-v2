@@ -4,8 +4,8 @@
 
 - Read [README.md](README.md) for commands; consult [operator guidance](docs/operations.md)
   and the [image reference](docs/agent-image.md) when changing those areas.
-- Read [SPEC.md](SPEC.md) and [docs/contracts.md](docs/contracts.md) for affected
-  behavior/interfaces, and [CONTEXT.md](CONTEXT.md) before naming domain concepts.
+- Read [SPEC.md](SPEC.md) for affected behavior/interfaces, and
+  [CONTEXT.md](CONTEXT.md) before naming domain concepts.
 - For execution-model changes, read [DECISIONS.md](DECISIONS.md) and
   [docs/slices/current-slice.md](docs/slices/current-slice.md). Keep one execution
   backend. Docker engine access grants effective engine/host control, not isolation.
