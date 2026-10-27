@@ -157,9 +157,33 @@ repaired automatically.
 
 ## Diagnostics and safety
 
-Warnings/errors go to stderr; command output stays in private run logs. New run
-directories use **0700**, logs **0600**, with known-secret redaction. Never publish
-raw transcripts. [logging.ini](../logging.ini) supplies optional development defaults.
+The runner emits application logs as **JSON Lines on stderr**, with **INFO**
+progress enabled by default; WARNING/ERROR indicate problems. Logging does not
+write to stdout or create application log files. There is no format switch or
+logging configuration field in operator TOML.
+
+Every record includes a UTC `timestamp`, standard `level`, stable `event`, and
+readable `message`. Optional `repository`, `issue`, `phase`, `run_id` (the existing
+sandbox identity), and validated `pr_url` are included when available; missing
+context is omitted. Startup failures may lack repository/issue context.
+
+To collect logs, explicitly redirect stderr to an operator-managed path:
+
+```sh
+uv run --frozen python -m software_factory --config /absolute/path/to/factory.toml 2>factory.jsonl
+```
+
+Logs are synchronous diagnostic output, not recovery state or proof of a remote
+operation. A slow destination can block; lost output is not recovered. Standard
+logging handler error handling applies. Keep collected logs private and manage
+their retention yourself; `2>` overwrites an existing file.
+
+Only selected fields and factory-controlled messages or sanitized failure
+summaries are serialized, not arbitrary extras, exception details, or transcripts.
+The formatter is not a general secret redactor. Command output stays in private
+run logs with known-secret redaction. New run directories use **0700**, logs
+**0600**. Never publish raw transcripts.
+[logging.ini](../logging.ini) supplies equivalent optional development defaults.
 
 | Problem | Operator action |
 | --- | --- |

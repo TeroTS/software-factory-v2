@@ -1,4 +1,7 @@
+import json
 import signal
+import subprocess
+import sys
 from pathlib import Path
 from unittest.mock import Mock
 
@@ -60,3 +63,54 @@ def test_sigterm_becomes_cleanup_capable_interruption() -> None:
 
     with pytest.raises(KeyboardInterrupt):
         stop(signal.SIGTERM, None)
+
+
+def test_cli_default_logs_info_and_interruption_as_json_stderr(tmp_path: Path) -> None:
+    config = tmp_path / "factory.toml"
+    config.write_text(
+        'repository = "owner/repo"\nmodel = "chosen"\nagent_image = "agent:local"\nartifacts_dir = "runs"\n'
+    )
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "from unittest.mock import patch; "
+            "from software_factory.__main__ import main; "
+            "from software_factory.runner import AgentRuntime; "
+            "runtime = AgentRuntime('sha256:resolved', 'unix:///local.sock'); "
+            "startup = patch('software_factory.__main__.preflight', return_value=runtime); startup.start(); "
+            "poll = patch('software_factory.runner.Runner.poll_once', side_effect=KeyboardInterrupt); poll.start(); "
+            "raise SystemExit(main())",
+            "--config",
+            str(config),
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 130
+    assert result.stdout == ""
+    records = [json.loads(line) for line in result.stderr.splitlines()]
+    polling = next(record for record in records if record["event"] == "runner_polling")
+    assert polling["level"] == "INFO" and polling["repository"] == "owner/repo"
+    assert records[-1]["event"] == "runner_interrupted"
+    assert records[-1]["repository"] == "owner/repo"
+    assert all({"timestamp", "level", "event", "message"} <= record.keys() for record in records)
+
+
+def test_cli_startup_failure_is_json_without_raw_input(tmp_path: Path) -> None:
+    config = tmp_path / "factory.toml"
+    config.write_text("private-invalid-input")
+    result = subprocess.run(
+        [sys.executable, "-m", "software_factory", "--config", str(config)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 1
+    assert result.stdout == ""
+    record = json.loads(result.stderr)
+    assert record["event"] == "runner_failed" and record["level"] == "ERROR"
+    assert "Cannot read configuration" in record["message"]
+    assert "repository" not in record and "issue" not in record
+    assert "private-invalid-input" not in result.stderr

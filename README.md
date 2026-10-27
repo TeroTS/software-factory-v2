@@ -67,6 +67,12 @@ Run only one runner per repository.
 uv run --frozen python -m software_factory --config /absolute/path/to/factory.toml
 ```
 
+Application logs are JSON Lines on **stderr**, with **INFO** progress enabled by
+default; logging leaves stdout unused. Each record has UTC `timestamp`, `level`,
+`event`, and `message`, plus `repository`, `issue`, `phase`, `run_id`, and `pr_url`
+when available. Command output remains in private run logs. See
+[diagnostics](docs/operations.md#diagnostics-and-safety) for collection and limits.
+
 - Ctrl-C/SIGTERM stops the runner and attempts bounded cleanup.
 - Failed runs retain private diagnostics; no automatic repair, requeue, or resume.
 - Rebuild the image and restart the runner after image, instruction, or skill changes.

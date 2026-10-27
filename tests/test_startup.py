@@ -444,6 +444,7 @@ def test_validated_runtime_reaches_serial_issue_dispatch(startup, monkeypatch) -
 
 
 def test_runner_polls_every_thirty_seconds_and_survives_discovery_errors(startup, monkeypatch, caplog) -> None:
+    caplog.set_level("INFO", logger="software_factory")
     config, _, _ = startup
     runner = Runner(config, preflight(config))
     polls = Mock(side_effect=[FactoryError("GitHub unavailable"), None])

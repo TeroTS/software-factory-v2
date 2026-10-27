@@ -87,7 +87,8 @@ GitHub holds durable coordination; no database, HTTP API, or hosted deployment e
   with no default; never move/delete previous diagnostics implicitly. Use fresh
   private run directories and host-usable files. Targets supply ordinary services, not
   target-specific factory agent images or Compose profiles.
-- Use standard-library logging: WARNING to stderr, no application log files.
+- Use standard-library runner logging: INFO by default as JSON Lines to stderr,
+  no application log files. Serialize only selected context and safe messages.
   `logging.ini` provides optional equivalent development defaults. Never log
   secrets or full transcripts; command diagnostics belong only in private run logs.
 - Keep credentials/private artifacts out of version control; `artifacts/`, `.venv`,

@@ -215,7 +215,11 @@ def preflight(config: Config) -> AgentRuntime:
         try:
             Commands().run(["docker", "rm", "--force", "--volumes", name], "startup cleanup", env=env)
         except FactoryError:
-            LOGGER.error("Cannot remove startup probe %s; inspect this container on the local engine", name)
+            LOGGER.error(
+                "Cannot remove startup probe %s; inspect this container on the local engine",
+                name,
+                extra={"event": "startup_cleanup_failed", "repository": config.repository, "phase": "cleanup"},
+            )
             if not failed:
                 raise
     return AgentRuntime(image_id, env["DOCKER_HOST"], auth)
@@ -231,24 +235,36 @@ class Runner:
 
     # Poll every 30 seconds, reporting discovery errors and propagating interruption to the terminal entrypoint.
     def run(self) -> None:
-        LOGGER.warning(
-            "Polling %s every 30 seconds; Docker-enabled first-pass execution active", self.config.repository
+        LOGGER.info(
+            "Polling %s every 30 seconds; Docker-enabled first-pass execution active",
+            self.config.repository,
+            extra={"event": "runner_polling", "repository": self.config.repository},
         )
         while True:
             try:
                 self.poll_once()
             except FactoryError as error:
-                LOGGER.error("Polling failed: %s", error)
+                LOGGER.error(
+                    "Polling failed: %s",
+                    error,
+                    extra={"event": "poll_failed", "repository": self.config.repository},
+                )
             time.sleep(30)
 
     # Discover labeled issues serially; retained diagnostics are never interpreted as resumable work.
     def poll_once(self) -> None:
+        LOGGER.info(
+            "Checking for labeled issues", extra={"event": "poll_started", "repository": self.config.repository}
+        )
         github = GitHub(self.config.repository, Commands(), self.runtime.github_auth)
         for number in github.discover():
             self.process_issue(number)
 
     # Confirm duplicate/claim state, execute one first-pass run, and report failures without restoring the trigger.
     def process_issue(self, number: int) -> None:
+        logger = logging.LoggerAdapter(
+            LOGGER, {"repository": self.config.repository, "issue": number}, merge_extra=True
+        )
         commands = Commands(deadline=time.monotonic() + 900)
         github = GitHub(self.config.repository, commands, self.runtime.github_auth)
         claimed = False
@@ -266,12 +282,15 @@ class Runner:
                     "clean up the remote branch and reapply agent:implement"
                 )
                 github.comment(number, message)
+                logger.info("%s", message, extra={"event": "issue_skipped", "pr_url": existing})
                 return
+            logger.info("Issue #%s implementation started", number, extra={"event": "issue_started"})
             directory = Path(tempfile.mkdtemp(prefix=f"issue-{number}-", dir=self.artifacts))
             commands.log = directory / "run.log"
             github.comment(number, "Running: implementation started")
             url = self.execute(number, github, commands, directory)
             github.comment(number, "Succeeded: " + url)
+            logger.info("Issue #%s succeeded", number, extra={"event": "issue_succeeded", "pr_url": url})
         except FactoryError as error:
             self.report_failure(number, claimed, str(error), directory)
             return
@@ -281,13 +300,16 @@ class Runner:
             )
             return
         except KeyboardInterrupt:
+            logger.warning("Issue #%s interrupted by operator", number, extra={"event": "issue_interrupted"})
             self.report_failure(number, claimed, "operator interruption", directory)
             raise
         if directory is not None:
             try:
                 shutil.rmtree(directory)
             except OSError:
-                LOGGER.error("Could not remove successful workspace: %s", directory)
+                logger.error(
+                    "Could not remove successful workspace: %s", directory, extra={"event": "workspace_removal_failed"}
+                )
 
     # Run setup/Pi/verification under one deadline, stop mutators and clean resources, then publish through trusted Git.
     def execute(self, number: int, github: GitHub, commands: Commands, directory: Path) -> str:
@@ -295,25 +317,44 @@ class Runner:
         branch = github.default_branch()
         repository = Repository(directory, commands, self.runtime.github_auth)
         url = f"https://github.com/{self.config.repository}.git"
+        context = {"repository": self.config.repository, "issue": number}
+        logger = logging.LoggerAdapter(LOGGER, context, merge_extra=True)
+        logger.info("Checking out target repository", extra={"event": "phase_started", "phase": "checkout"})
         snapshot["base_commit"] = repository.checkout(url, branch)
         sandbox = Sandbox(self.runtime.image_id, self.runtime.docker_host, directory, commands)
-        LOGGER.warning("Issue #%s run identity %s; private diagnostics %s", number, sandbox.project, directory)
+        context["run_id"] = sandbox.project
+        logger.info(
+            "Issue #%s run identity %s; private diagnostics %s",
+            number,
+            sandbox.project,
+            directory,
+            extra={"event": "run_started"},
+        )
         failure = None
         try:
+            logger.info("Starting agent", extra={"event": "phase_started", "phase": "agent_startup"})
             sandbox.start()
+            logger.info("Running setup", extra={"event": "phase_started", "phase": "setup"})
             sandbox.setup()
             bearer = copilot_bearer(commands, directory)
             commands.secrets.append(bearer)
             endpoint = copilot_endpoint(bearer)
+            logger.info("Running implementation", extra={"event": "phase_started", "phase": "implementation"})
             sandbox.implement(snapshot, bearer, endpoint, self.config.model)
+            logger.info("Running verification", extra={"event": "phase_started", "phase": "verification"})
             sandbox.verify()
         except BaseException as error:
             # Unexpected failures must not bypass removal of daemon-managed work either.
             failure = error
         try:
+            logger.info("Cleaning up run-owned resources", extra={"event": "phase_started", "phase": "cleanup"})
             sandbox.stop()
         except FactoryError, OSError:
-            LOGGER.error("Run cleanup failed; inspect private diagnostics and run-owned resources: %s", directory)
+            logger.error(
+                "Run cleanup failed; inspect private diagnostics and run-owned resources: %s",
+                directory,
+                extra={"event": "cleanup_failed", "phase": "cleanup"},
+            )
             if not isinstance(failure, KeyboardInterrupt):
                 reason = f"{failure}; " if isinstance(failure, FactoryError) else ""
                 raise FactoryError(reason + "run cleanup failed; publication blocked") from None
@@ -321,10 +362,15 @@ class Runner:
             raise failure
         if commands.deadline is not None and time.monotonic() >= commands.deadline:
             raise FactoryError("issue-run deadline expired")
+        logger.info("Publishing verified changes", extra={"event": "phase_started", "phase": "publication"})
         repository.commit(number)
         try:
             repository.push(url, number)
-            return github.publish(number, snapshot["title"], branch)
+            pr_url = github.publish(number, snapshot["title"], branch)
+            logger.info(
+                "Draft PR published", extra={"event": "publication_completed", "phase": "publication", "pr_url": pr_url}
+            )
+            return pr_url
         except (FactoryError, OSError) as error:
             reason = str(error) if isinstance(error, FactoryError) else "publication filesystem operation failed"
             # Observe uncertain publication once with a separate bounded read budget; never retry a write.
@@ -343,15 +389,22 @@ class Runner:
                     )
                 )
             except FactoryError, OSError:
-                LOGGER.error("remote publication state could not be checked for issue #%s", number)
+                logger.error(
+                    "remote publication state could not be checked for issue #%s",
+                    number,
+                    extra={"event": "publication_observation_failed", "phase": "publication"},
+                )
                 state = "remote publication state could not be checked; operator inspection required"
             raise FactoryError(f"{reason}; {state}") from None
 
     # Report a concise failure with a bounded status-only budget, retaining private diagnostics without raw output.
     def report_failure(self, number: int, claimed: bool, reason: str, directory: Path | None) -> None:
-        LOGGER.error("Issue #%s failed: %s", number, reason)
+        logger = logging.LoggerAdapter(
+            LOGGER, {"repository": self.config.repository, "issue": number}, merge_extra=True
+        )
+        logger.error("Issue #%s failed: %s", number, reason, extra={"event": "issue_failed"})
         if directory is not None:
-            LOGGER.error("Retained private diagnostics: %s", directory)
+            logger.error("Retained private diagnostics: %s", directory, extra={"event": "diagnostics_retained"})
         if claimed:
             try:
                 github = GitHub(
@@ -359,4 +412,8 @@ class Runner:
                 )
                 github.comment(number, "Failed: " + reason)
             except FactoryError, OSError:
-                LOGGER.error("GitHub failure reporting unavailable for issue #%s", number)
+                logger.error(
+                    "GitHub failure reporting unavailable for issue #%s",
+                    number,
+                    extra={"event": "failure_reporting_failed"},
+                )

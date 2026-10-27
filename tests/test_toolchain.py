@@ -1,3 +1,4 @@
+import json
 import os
 import shutil
 import subprocess
@@ -86,7 +87,7 @@ def test_entrypoints_preserve_task_result(tmp_path: Path, entrypoint: str, exit_
     assert result.stdout.splitlines() == [str(tmp_path.resolve()), entrypoint]
 
 
-def test_development_logging_is_warning_only_on_stderr() -> None:
+def test_development_logging_is_info_json_on_stderr() -> None:
     result = subprocess.run(
         [
             sys.executable,
@@ -102,4 +103,7 @@ def test_development_logging_is_warning_only_on_stderr() -> None:
     )
 
     assert result.stdout == ""
-    assert result.stderr == "WARNING root: warning\n"
+    records = [json.loads(line) for line in result.stderr.splitlines()]
+    assert [record["level"] for record in records] == ["INFO", "WARNING"]
+    assert [record["message"] for record in records] == ["info", "warning"]
+    assert all(record["event"] == "application_log" for record in records)

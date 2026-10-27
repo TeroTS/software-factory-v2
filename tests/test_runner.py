@@ -28,6 +28,7 @@ def runtime(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     repo = Mock()
     repo.checkout.return_value = "a" * 40
     sandbox = Mock()
+    sandbox.project = "factory-test-run"
 
     def command_factory(**kwargs):
         commands.deadline = kwargs.get("deadline")
@@ -326,3 +327,82 @@ def test_successful_workspace_removal_failure_does_not_erase_publication(runtime
     runner.poll_once()
     assert github.comment.call_args.args[1].startswith("Succeeded:")
     assert "Could not remove successful workspace" in caplog.text
+
+
+def test_progress_logs_follow_execution_boundaries_with_available_context(runtime, caplog) -> None:
+    runner, _, _, _, _ = runtime
+    caplog.set_level("INFO", logger="software_factory")
+    runner.poll_once()
+    records = caplog.records
+    assert [record.event for record in records] == [
+        "poll_started",
+        "issue_started",
+        "phase_started",
+        "run_started",
+        "phase_started",
+        "phase_started",
+        "phase_started",
+        "phase_started",
+        "phase_started",
+        "phase_started",
+        "publication_completed",
+        "issue_succeeded",
+    ]
+    phases = [record for record in records if record.event == "phase_started"]
+    assert [record.phase for record in phases] == [
+        "checkout",
+        "agent_startup",
+        "setup",
+        "implementation",
+        "verification",
+        "cleanup",
+        "publication",
+    ]
+    assert all(record.levelname == "INFO" and record.repository == "owner/repo" for record in records)
+    assert not hasattr(records[0], "issue")
+    assert all(record.issue == 1 for record in records[1:])
+    assert not hasattr(phases[0], "run_id")
+    assert all(record.run_id == "factory-test-run" for record in phases[1:])
+    publication = next(record for record in records if record.event == "publication_completed")
+    assert publication.pr_url == "https://github.com/owner/repo/pull/3"
+    assert publication.run_id == "factory-test-run"
+
+
+@pytest.mark.parametrize("existing_pr", [None, "https://github.com/owner/repo/pull/3"])
+def test_skip_is_info_and_includes_only_known_pr_link(runtime, caplog, existing_pr) -> None:
+    runner, github, *_ = runtime
+    github.open_pr.return_value = existing_pr
+    github.branch_exists.return_value = True
+    caplog.set_level("INFO", logger="software_factory")
+    runner.poll_once()
+    skipped = next(record for record in caplog.records if record.event == "issue_skipped")
+    assert skipped.levelname == "INFO"
+    assert skipped.repository == "owner/repo" and skipped.issue == 1
+    assert getattr(skipped, "pr_url", None) == existing_pr
+    assert not hasattr(skipped, "run_id")
+    assert "issue_started" not in [record.event for record in caplog.records]
+
+
+@pytest.mark.parametrize("interrupted", [False, True])
+def test_failed_execution_logs_cleanup_and_safe_outcome_without_false_success(runtime, caplog, interrupted) -> None:
+    from software_factory.logging_format import JsonFormatter
+
+    runner, _, _, sandbox, _ = runtime
+    sandbox.verify.side_effect = KeyboardInterrupt() if interrupted else VerificationFailed("private transcript")
+    caplog.set_level("INFO", logger="software_factory")
+    if interrupted:
+        with pytest.raises(KeyboardInterrupt):
+            runner.poll_once()
+    else:
+        runner.poll_once()
+    events = [record.event for record in caplog.records]
+    assert "publication_completed" not in events and "issue_succeeded" not in events
+    outcome = next(record for record in caplog.records if record.event == "issue_failed")
+    assert outcome.levelname == "ERROR"
+    assert outcome.repository == "owner/repo" and outcome.issue == 1
+    assert ("operator interruption" if interrupted else "verification failed") in outcome.getMessage()
+    assert ("issue_interrupted" in events) is interrupted
+    cleanup = [record for record in caplog.records if getattr(record, "phase", None) == "cleanup"]
+    assert cleanup[0].event == "phase_started"
+    assert cleanup[0].run_id == "factory-test-run"
+    assert "private transcript" not in "".join(JsonFormatter().format(record) for record in caplog.records)
