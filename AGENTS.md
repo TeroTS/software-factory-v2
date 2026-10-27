@@ -22,7 +22,8 @@
 
 Local autonomous coding factory: the Python standard-library runner validates
 shared-image startup, polls GitHub, and executes issue runs.
-GitHub holds durable coordination; no database, HTTP API, or hosted deployment exists.
+GitHub holds durable coordination; no database or HTTP API exists. The same runner
+uses provisioned Ubuntu ARM64 hosts on Lima or EC2.
 
 - `src/software_factory/__main__.py`, `config.py`: terminal CLI, signals, four-field TOML.
 - `runner.py`: native image/engine preflight, serial issue coordination, cleanup/publication gates.

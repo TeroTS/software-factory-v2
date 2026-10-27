@@ -43,7 +43,7 @@ EXTERNAL_PACKAGES = {
     "containerd.io": "2.4.2-3~ubuntu.24.04~noble",
     "docker-buildx-plugin": "0.38.1-1~ubuntu.24.04~noble",
     "docker-compose-plugin": "5.6.1-1~ubuntu.24.04~noble",
-    "gh": "2.103.2",
+    "gh": "2.103.3",
 }
 PYTHON_SHA = "a97d5549e9ad81fe17159ed02c68774ad5d266c72f8d9a0b5a9c371fe85d902b"
 NODE_SHA = "0b2d9f564b6594222a62c82e1df2efe119dd4a4aff29644f4dd325bf360b6bcc"

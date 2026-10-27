@@ -51,6 +51,31 @@ requires a local native Linux ARM64 engine and absolute Unix socket; explicit
 `DOCKER_CONTEXT` overrides `DOCKER_HOST`. See [README](../README.md#run-the-factory)
 for runtime behavior and [recovery](#manual-inspection-and-recovery) for stopping/requeueing.
 
+## EC2 host setup
+
+Use the same Ubuntu ARM64 runtime on EC2; no second execution backend is involved.
+Run AWS commands from an authenticated operator machine, not from an agent:
+
+```sh
+export AWS_PROFILE=AWSAdministratorAccess-172318459814 AWS_REGION=eu-central-1
+aws sts get-caller-identity  # require account 172318459814
+aws cloudformation validate-template --template-body file://infra/ec2/factory.yaml
+aws cloudformation deploy --stack-name software-factory --template-file infra/ec2/factory.yaml \
+  --parameter-overrides UbuntuAmi=ami-07a4d842baa6e2884 --capabilities CAPABILITY_IAM --disable-rollback
+aws cloudformation describe-stacks --stack-name software-factory --query 'Stacks[0].Outputs'
+aws ssm start-session --target '<InstanceId from stack outputs>'
+```
+
+The AMI pin is Canonical (`099720109477`) Ubuntu 24.04 ARM64; verify it before deployment.
+The template uses JSON-form YAML so ordinary tests need no YAML dependency. It prepares
+retained storage, not the full toolchain: transfer trusted committed factory source via
+Session Manager, run `scripts/provision-host` and `--check` as administrator, then follow
+[manual authentication](#authentication). Never start the runner implicitly.
+Check `cloud-init status --wait` and mounts before provisioning. Stack completion alone
+is not host readiness. The data volume retains factory home, Docker/containerd data,
+and future releases/artifacts; root is disposable. Docker services require these mounts.
+Retained volumes incur charges after deletion; no backups or cross-AZ restore are provided.
+
 ## Authentication
 
 Perform setup **inside the VM as factory**, using the provisioned tools.

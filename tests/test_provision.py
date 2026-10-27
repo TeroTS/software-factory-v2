@@ -317,6 +317,7 @@ def test_package_sources_are_isolated_signed_and_reused(host, monkeypatch, tmp_p
     host.install_packages(commands, tmp_path)
     assert installs[0][0] == host.UBUNTU_PACKAGES
     assert installs[1][0] == host.EXTERNAL_PACKAGES
+    assert installs[1][0]["gh"] == "2.103.3"
     assert "signed-by=/usr/share/keyrings/ubuntu-archive-keyring.gpg" in installs[0][1]
     assert "https://download.docker.com/linux/ubuntu noble stable" in installs[1][1]
     assert "https://cli.github.com/packages stable main" in installs[1][1]

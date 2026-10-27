@@ -11,11 +11,11 @@ Repository-managed infrastructure, supervised operation, release-specific softwa
 The operator provisions infrastructure, enrolls credentials, deploys releases, starts/stops the service, and handles recovery; the existing factory executes issue runs.
 
 ## Non-Goals
-No live AWS deployment in this task, parallel workers, application deployment, container registry/release pipeline, or graceful-draining implementation.
+No parallel workers, application deployment, container registry/release pipeline, or graceful-draining implementation. GitHub App/Copilot credential enrollment and live issue execution remain manual, separately authorized steps.
 
 ## Locked Decisions
 ### Product / Scope
-- Implement and test repository artifacts only: CloudFormation, deployment scripts, systemd unit, and operator procedures. AWS creation, credential enrollment, and live validation require separate approval.
+- Implement repository-managed CloudFormation, deployment scripts, systemd supervision, and operator procedures, and deploy incrementally to AWS now. The operator approved AWS resource creation, EC2 host preparation, and live AWS validation using profile `AWSAdministratorAccess-172318459814` in account `172318459814`; verify the authenticated account before creating resources.
 ### UX / Workflow
 - Deploy an exact Git commit and explicitly build its shared image on EC2. Prefer stopping while idle; existing interruption and cleanup behavior applies if a run is active.
 ### Data / State / Ownership
@@ -37,13 +37,13 @@ Keep credentials and diagnostics private and outside releases/images. Do not sil
 ## Interface / Contract Expectations
 Deployment must not silently start issue execution, change operator TOML fields, or introduce a second execution backend.
 ## Operational / Deployment Constraints
-No AWS resources, privileged provisioning, or authenticated live checks without separate approval. Docker grants effective host control; IAM and private file modes do not isolate agents from the host. Public IPv4, EBS, EC2, and possible burst-credit usage incur charges.
+Run basic local checks before deployment, then validate each implemented slice on AWS; offline/scripted checks alone do not establish deployment success. AWS and EC2 host-preparation operations are approved within this deployment scope; unrelated resources and live GitHub/Copilot checks are not. Docker grants effective host control, not isolation. Public IPv4, EBS, EC2, and possible burst-credit usage incur charges.
 ## Assumptions
-The operator supplies AWS access, repository source access, target configuration, and manual GitHub App/Copilot enrollment. Exact AMI selection and deployment command details are implementation work, not permission for live deployment.
+The operator supplies a valid AWS SSO session for the approved profile, repository source access, target configuration, and manual GitHub App/Copilot enrollment. Exact AMI selection and deployment command details remain implementation work.
 
 ## Open Questions
-- None currently for repository-only implementation; any additional policy, dependency, or public-interface decisions require approval.
+- None currently for incremental AWS deployment; any additional policy, dependency, or public-interface decisions require approval.
 
 ## Ready for Spec Generation
 - Status: yes
-- Reason: `$decision-to-spec` can describe the agreed deployment scope without inventing policy; preserve existing execution behavior and defer live acceptance until separately approved.
+- Reason: The deployment scope now includes approved live AWS acceptance; preserve existing execution behavior and do not treat infrastructure approval as permission to execute target issues.

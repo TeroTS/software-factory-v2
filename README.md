@@ -31,8 +31,9 @@ lint, and tests with an **80%** line/branch coverage gate, including the Pi brid
 Run on provisioned **Ubuntu 24.04 LTS ARM64** as **factory 2000:2000**, with local
 native Docker/Compose, Git, `gh`, OpenSSL, curl, GitHub App credentials, and authenticated
 Pi/Copilot (tested Pi **1.3.0**). Direct macOS execution and remote Docker engines are unsupported.
-Follow [host provisioning](docs/operations.md#operator-setup) and the
-[one-time authentication setup](docs/operations.md#authentication) first.
+Follow [Lima host provisioning](docs/operations.md#operator-setup) or
+[EC2 host setup](docs/operations.md#ec2-host-setup), then the
+[one-time authentication setup](docs/operations.md#authentication).
 
 As `factory`, from a factory-owned checkout on the Linux disk:
 
