@@ -2,4 +2,4 @@
 set -eu
 cd "$(dirname "$0")/.."
 test -d src
-exec uv run --frozen pytest --cov=src --cov-report=term-missing --cov-report=xml
+exec uv run --frozen pytest --cov=src --cov=infra/ec2 --cov-report=term-missing --cov-report=xml

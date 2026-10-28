@@ -1,0 +1,10 @@
+{
+  "name": "software-factory-infrastructure",
+  "private": true,
+  "scripts": {
+    "cdk": "cdk"
+  },
+  "devDependencies": {
+    "aws-cdk": "2.1146.1"
+  }
+}

@@ -6,6 +6,8 @@ requires-python = ">=3.14,<3.15"
 
 [dependency-groups]
 dev = [
+    "aws-cdk-lib>=2.275.0",
+    "constructs>=10.8.1",
     "pytest>=9.1.1",
     "pytest-cov>=7.1.0",
     "ruff>=0.17.2",
@@ -33,7 +35,7 @@ markers = [
 ]
 
 [tool.coverage.run]
-source = ["src"]
+source = ["src", "infra/ec2"]
 branch = true
 
 [tool.coverage.report]

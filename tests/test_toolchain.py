@@ -26,7 +26,7 @@ def test_required_pi_files_are_readable_and_nonempty(file: str) -> None:
 
 def test_coverage_policy() -> None:
     config = tomllib.loads((ROOT / "pyproject.toml").read_text())
-    assert config["tool"]["coverage"]["run"]["source"] == ["src"]
+    assert config["tool"]["coverage"]["run"]["source"] == ["src", "infra/ec2"]
     assert config["tool"]["coverage"]["run"]["branch"] is True
     assert config["tool"]["coverage"]["report"]["fail_under"] == 80
 
@@ -60,6 +60,7 @@ def test_coverage_never_disables_threshold(tmp_path: Path, has_source: bool | No
     assert result.returncode == 7
     args = result.stdout.splitlines()
     assert args[:4] == ["run", "--frozen", "pytest", "--cov=src"]
+    assert "--cov=infra/ec2" in args
     assert "--cov-fail-under=0" not in args
     assert result.stderr == ""
 

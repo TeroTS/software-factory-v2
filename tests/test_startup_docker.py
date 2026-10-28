@@ -1,14 +1,12 @@
 import json
 import os
-import signal
 import subprocess
-import sys
 import time
 from pathlib import Path
 from unittest.mock import Mock
 
 import pytest
-from tests_support import app_credentials
+from tests_support import app_credentials, runner_container
 
 from software_factory.config import Config
 from software_factory.process import Commands, FactoryError
@@ -390,7 +388,7 @@ def test_startup_rejects_incompatible_image_without_runtime_repair(
     assert not remaining.strip()
 
 
-def test_operator_starts_real_cli_with_shared_image_and_observes_idle_polling(tmp_path: Path) -> None:
+def test_operator_starts_runner_container_and_observes_idle_polling(tmp_path: Path) -> None:
     home = tmp_path / "home"
     tools = tmp_path / "tools"
     tools.mkdir()
@@ -398,7 +396,7 @@ def test_operator_starts_real_cli_with_shared_image_and_observes_idle_polling(tm
     marker = tmp_path / "github-calls"
     gh = tools / "gh"
     gh.write_text(
-        f"#!{sys.executable}\n"
+        "#!/usr/bin/env python3\n"
         "import json, os, pathlib, sys\n"
         f"path = pathlib.Path({str(marker)!r})\n"
         "with path.open('a') as log: log.write(json.dumps(sys.argv[1:]) + '\\n')\n"
@@ -423,35 +421,18 @@ def test_operator_starts_real_cli_with_shared_image_and_observes_idle_polling(tm
     (previous / "run.log").write_text("previous diagnostic\n")
     image_id = subprocess.check_output(["docker", "image", "inspect", IMAGE, "--format", "{{.Id}}"], text=True).strip()
     output = tmp_path / "stderr"
-    with output.open("w") as stderr:
-        process = subprocess.Popen(
-            [sys.executable, "-m", "software_factory", "--config", str(config)],
-            cwd=ROOT,
-            env={
-                **os.environ,
-                "HOME": str(home),
-                "DOCKER_CONFIG": os.environ.get("DOCKER_CONFIG", str(Path.home() / ".docker")),
-                "PATH": str(tools) + os.pathsep + os.environ["PATH"],
-            },
-            stdout=subprocess.DEVNULL,
-            stderr=stderr,
-        )
-        try:
-            deadline = time.monotonic() + 90
-            while time.monotonic() < deadline:
-                text = output.read_text()
-                if "first-pass execution active" in text and marker.exists():
-                    calls = [json.loads(line) for line in marker.read_text().splitlines()]
-                    if any(call[0] == "api" for call in calls):
-                        break
-                assert process.poll() is None, text
-                time.sleep(0.1)
-            else:
-                pytest.fail("CLI did not reach polling: " + output.read_text())
-        finally:
-            if process.poll() is None:
-                process.send_signal(signal.SIGTERM)
-            process.wait(timeout=15)
+    with output.open("w") as stderr, runner_container(config, stderr) as (process, _):
+        deadline = time.monotonic() + 90
+        while time.monotonic() < deadline:
+            text = output.read_text()
+            if "first-pass execution active" in text and marker.exists():
+                calls = [json.loads(line) for line in marker.read_text().splitlines()]
+                if any(call[0] == "api" for call in calls):
+                    break
+            assert process.poll() is None, text
+            time.sleep(0.1)
+        else:
+            pytest.fail("Runner container did not reach polling: " + output.read_text())
     assert process.returncode == 130
     assert "Polling owner/repo every 30 seconds" in output.read_text()
     assert "Traceback" not in output.read_text()

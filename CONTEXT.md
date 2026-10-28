@@ -1,9 +1,9 @@
 # Domain Vocabulary
 
 Execution terms reflect the accepted direction in [DECISIONS.md](DECISIONS.md).
-US-04 implements shared-image startup; US-05 implements first-pass execution and
-publication. US-06 repairs and US-07 manual-requeue acceptance remain deferred.
-Behavior and interface requirements remain in [SPEC.md](SPEC.md).
+AWS EC2 deployment packages the existing local runner and shared agent image independently;
+it does not introduce another execution backend. Behavior and interface requirements
+remain in [SPEC.md](SPEC.md).
 
 ## Canonical Terms
 
@@ -33,7 +33,7 @@ One attempt to process an issue from claim to success or failure, including setu
 
 ### Shared agent image
 
-The factory-maintained, versioned Linux image providing Pi and baseline development tools across target repositories. The operator builds it before starting the local runner; it is not a target application image.
+The factory-maintained, versioned Linux image providing Pi, instructions, skills, and baseline development tools across target repositories. The operator builds it or explicitly pulls it from ECR before starting the local runner; it is not a target application image. Its version is independent of the runner container, which supplies the bridge.
 
 ### Agent environment
 

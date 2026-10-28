@@ -23,7 +23,7 @@
 Local autonomous coding factory: the Python standard-library runner validates
 shared-image startup, polls GitHub, and executes issue runs.
 GitHub holds durable coordination; no database or HTTP API exists. The same runner
-uses provisioned Ubuntu ARM64 hosts on Lima or EC2.
+runs only in a runner container on a CloudFormation-prepared Ubuntu ARM64 EC2 host.
 
 - `src/software_factory/__main__.py`, `config.py`: terminal CLI, signals, four-field TOML.
 - `runner.py`: native image/engine preflight, serial issue coordination, cleanup/publication gates.
@@ -35,28 +35,30 @@ uses provisioned Ubuntu ARM64 hosts on Lima or EC2.
 - `tests/`: pytest unit, real local Git/process/Docker, scripted external-boundary CLI E2E;
   `tests/test_agent_wrapper.py` exercises the standalone Python bridge and measures its coverage.
 - `scripts/`, `Makefile`, `.github/workflows/verify.yml`: development entrypoints and CI.
-- `scripts/provision-host`, `infra/lima/`: explicit Ubuntu host preparation;
-  privileged provisioning checks require operator authorization.
+- `infra/ec2/`: Python CDK stack and file-based shell UserData embedded at synthesis;
+  retained storage must be ready before Docker installation/start. No separate host provisioner
+  or hand-maintained CloudFormation template. Node/CDK are development/operator tools only.
 
 ## Development workflow
 
 - Follow [README development commands](README.md#development); run `./scripts/verify`
   in order: Ruff format check → lint → tests/coverage. `make format` mutates files.
-- Use the locked dependencies and pinned toolchain/backend; host verification needs no Node.js.
+- Use locked development dependencies and pinned image toolchains/backend; host
+  EC2 UserData uses unpinned packages from signed repositories, except AWS CLI v2's
+  approved official ARM64 HTTPS installer without detached-signature verification. Host verification needs no Node.js.
 - Maintain the **80%** overall line/branch coverage gate, including the Pi bridge.
   Never lower thresholds or exclude business logic.
 - Add meaningful tests for behavior changes and relevant failures. Use existing pytest
   patterns; retain real Git/process and Docker boundary checks where applicable.
 - Unit checks may run on a development host. Docker/CLI checks require the provisioned
-  Ubuntu 24.04 ARM64 guest, factory 2000:2000, and an explicitly built shared image.
+  Ubuntu 24.04 ARM64 test host, factory 2000:2000, and an explicitly built shared image.
   CI verifies as the same identity without host sudo.
 - Distinguish scripted boundaries from real services. Live authenticated checks
-  (including Copilot probes) and privileged provisioning tests require explicit
-  approval. See [extended verification](docs/operations.md#verification-beyond-unit-tests).
+  (including Copilot probes) require explicit approval; AWS preparation follows the approved deployment scope. See [extended verification](docs/operations.md#verification-beyond-unit-tests).
 
 ## Configuration and local requirements
 
-- Runtime invocation: `uv run --frozen python -m software_factory --config /absolute/path/to/factory.toml`.
+- Runtime invocation inside the selected runner container: `python -m software_factory --config /absolute/path/to/factory.toml`.
   Inspect trigger labels before starting/upgrading: already-labeled issues are
   eligible for execution. Verification failures end the run without automatic repair.
 - Operator TOML requires exactly `repository`, `model`, `agent_image`, and
@@ -64,14 +66,26 @@ uses provisioned Ubuntu ARM64 hosts on Lima or EC2.
   the TOML; model IDs exactly match an accessible `github-copilot` model. Reject
   legacy Compose fields with migration guidance; never automatically migrate.
 - Runner execution requires the provisioned Ubuntu 24.04 LTS ARM64 Linux host
-  and effective factory UID/GID 2000:2000. Reject root/other IDs and unsupported
+  and effective factory UID/GID 2000:2000. Deployment is container-only on AWS EC2:
+  validate actual Docker/account host preparation separately;
+  retain same-path workspace binds, local engine/socket supplementary GID,
+  read-only App credentials, writable Pi refresh state, and private retained logs. Reject root/other IDs and unsupported
   hosts before claims; never switch accounts or elevate the host runner.
-  Git, `gh`, OpenSSL, curl, private host GitHub App credentials, authenticated Pi/Copilot
-  (tested Pi **1.3.0**), and Docker Compose are required. Initial authentication/
+  Git, `gh`, OpenSSL, curl, Python/Node, Pi (tested **1.3.0**), and Compose belong
+  inside images; private GitHub App credentials and Pi state persist outside them.
+  Host preparation includes AWS CLI from its approved upstream installer and signed Ubuntu prerequisites for
+  EC2-role ECR authentication, not runner execution; never save operator AWS credentials.
+  Host provisioning must not install runner toolchains, modify login profiles, or
+  remove existing tools/data. CloudFormation UserData owns host preparation, with read-only readiness inspection.
+  No Lima/local-host deployment or separate Python host provisioner. Initial authentication/
   access approval is manual. Repository API and HTTPS Git use the same App identity,
   never saved personal login or inherited-token fallback. Preserve private host-file
   modes and scoped token renewal; credentials never belong in operator TOML.
-- The operator builds the shared `agent/Dockerfile` image before startup. Require
+- The operator builds the shared `agent/Dockerfile` image before startup, or
+  explicitly publishes/pulls it through ECR deployment while stopped. Runner
+  and agent images are independently versioned; runner owns the bridge, agent
+  owns instructions/skills. No runtime builds/pulls, automatic updates, implicit
+  starts, compatibility negotiation, or V1 rollback/retention guarantees. Require
   a local native linux/arm64 engine/image and retain the resolved immutable image
   ID for the session. Bake factory 2000:2000, writable home/caches/npm prefix,
   and account-scoped sudo with root HOME into the image. Startup validates the

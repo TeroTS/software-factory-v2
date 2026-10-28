@@ -15,6 +15,9 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version-file: .python-version
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.19.0"
       - uses: astral-sh/setup-uv@v5
         with:
           version: "0.5.13"
@@ -33,10 +36,11 @@ jobs:
       - name: Setup, build, and verify as factory 2000:2000
         run: |
           sudo runuser -u factory -- env "PATH=$PATH" HOME=/home/factory \
-            FACTORY_DOCKER_TESTS=1 FACTORY_AGENT_IMAGE_TESTS=1 sh -ec '
+            FACTORY_DOCKER_TESTS=1 FACTORY_AGENT_IMAGE_TESTS=1 FACTORY_RUNNER_IMAGE_TESTS=1 sh -ec '
             cd /home/factory/checkout
             test "$(id -u):$(id -g)" = 2000:2000
             ./scripts/setup
             docker build --platform linux/arm64 -t software-factory-agent:1.0.0 agent
+            docker build --platform linux/arm64 -f runner/Dockerfile -t software-factory-runner:test .
             ./scripts/verify
           '

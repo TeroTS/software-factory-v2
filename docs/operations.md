@@ -2,49 +2,18 @@
 
 ## Operator setup
 
-Run the factory inside a provisioned **Ubuntu 24.04 ARM64 VM**, as **factory
-2000:2000**. Direct macOS execution, root/other runner identities, and remote Docker
-engines are unsupported. Keep checkouts and artifacts on the VM's Linux disk,
-not macOS shared folders.
+Deploy runner and agent containers **only on AWS EC2**, using **Ubuntu 24.04 ARM64**,
+**factory 2000:2000**, and a local Docker engine. Native-runner deployment, Lima/local-host
+deployment, root/other runner identities, and remote engines are unsupported.
 
-1. Stop Rancher Desktop, then start the [Lima VM](../infra/lima/factory.yaml)
-   from your Mac:
-
-   ```sh
-   limactl start --name=factory --tty=false infra/lima/factory.yaml
-   limactl shell factory
-   ```
-
-2. Clone or transfer a trusted factory checkout into the VM. From that checkout,
-   provision and check the host as administrator:
-
-   ```sh
-   sudo ./scripts/provision-host
-   sudo ./scripts/provision-host --check
-   ```
-
-   Provisioning installs tools but does not authenticate. If it fails, inspect the
-   reported private log. Fix HTTPS trust with an approved CA; never disable it.
-
-3. Switch accounts, use a factory-owned checkout, and install project dependencies:
-
-   ```sh
-   sudo -iu factory
-   cd /absolute/path/to/factory-checkout
-   ./scripts/setup
-   ```
-
-4. Complete [authentication](#authentication), [build the shared image](agent-image.md),
-   and prepare the [target repository](#shared-image-and-target-preparation).
-5. Create the four-field operator TOML shown in [README](../README.md#run-the-factory).
-   Keep it outside the target checkout/workspace. Relative artifact paths resolve
-   against the TOML directory; no credentials or `.env` loading are supported.
-6. **Inspect existing `agent:implement` labels:** already-labeled issues are eligible.
-   Run only one runner per repository, then start:
-
-   ```sh
-   uv run --frozen python -m software_factory --config /absolute/path/to/factory.toml
-   ```
+1. Complete [EC2 host setup](#ec2-host-setup); no host checkout or manual provisioner is needed.
+2. Switch to `factory` with `sudo -iu factory`, [publish/pull images](#ec2-image-publication),
+   complete [authentication](#authentication), and prepare the [target](#shared-image-and-target-preparation).
+3. Create the four-field operator TOML shown in [README](../README.md#run-the-factory),
+   outside the target checkout/workspace. No credentials or `.env` loading are supported.
+4. **Inspect existing `agent:implement` labels:** already-labeled issues are eligible.
+   Start the selected runner container only through an explicit supervisor start;
+   run only one runner per repository. Never deploy by invoking host Python.
 
 Startup validates the host, credentials, and local image before polling. Docker
 requires a local native Linux ARM64 engine and absolute Unix socket; explicit
@@ -53,32 +22,140 @@ for runtime behavior and [recovery](#manual-inspection-and-recovery) for stoppin
 
 ## EC2 host setup
 
-Use the same Ubuntu ARM64 runtime on EC2; no second execution backend is involved.
+The Python CDK app in `infra/ec2/` generates CloudFormation and embeds the three local shell
+files into first-boot UserData; it never fetches source at boot. The runner remains container-only.
+Run `./scripts/setup` first (Python/uv plus Node 22 LTS/npm on the operator computer).
 Run AWS commands from an authenticated operator machine, not from an agent:
 
 ```sh
 export AWS_PROFILE=AWSAdministratorAccess-172318459814 AWS_REGION=eu-central-1
 aws sts get-caller-identity  # require account 172318459814
-aws cloudformation validate-template --template-body file://infra/ec2/factory.yaml
-aws cloudformation deploy --stack-name software-factory --template-file infra/ec2/factory.yaml \
-  --parameter-overrides UbuntuAmi=ami-07a4d842baa6e2884 --capabilities CAPABILITY_IAM --disable-rollback
+test "$(aws sts get-caller-identity --query Account --output text)" = 172318459814
+npm run cdk -- synth --quiet
+aws cloudformation validate-template --template-body file://infra/ec2/cdk.out/software-factory.template.json
+npm run cdk -- diff --parameters UbuntuAmi=ami-07a4d842baa6e2884
+# Inspect the diff before approving the deployment:
+npm run cdk -- deploy --parameters UbuntuAmi=ami-07a4d842baa6e2884
 aws cloudformation describe-stacks --stack-name software-factory --query 'Stacks[0].Outputs'
 aws ssm start-session --target '<InstanceId from stack outputs>'
 ```
 
 The AMI pin is Canonical (`099720109477`) Ubuntu 24.04 ARM64; verify it before deployment.
-The template uses JSON-form YAML so ordinary tests need no YAML dependency. It prepares
-retained storage, not the full toolchain: transfer trusted committed factory source via
-Session Manager, run `scripts/provision-host` and `--check` as administrator, then follow
-[manual authentication](#authentication). Never start the runner implicitly.
-Check `cloud-init status --wait` and mounts before provisioning. Stack completion alone
-is not host readiness. The data volume retains factory home, Docker/containerd data,
-and future releases/artifacts; root is disposable. Docker services require these mounts.
-Retained volumes incur charges after deletion; no backups or cross-AZ restore are provided.
+Do not hand-edit generated templates. This asset-free stack uses CDK's bootstrapless synthesizer:
+no `cdk bootstrap`, bootstrap roles/buckets, or associated storage costs are needed.
+UserData mounts retained storage before installing Docker from signed repositories and AWS CLI v2
+from AWS's official ARM64 HTTPS installer, without detached-signature verification. It then creates/checks
+factory access. AWS CLI uses the EC2 role for ECR; no operator AWS credentials are saved on the host.
+Host tool versions are unpinned; image pins remain independent.
+In Session Manager, run `sudo cloud-init status --wait`, then `sudo /usr/local/sbin/factory-host-check`.
+The latter checks actual storage/identity/socket/native-engine access and AWS CLI availability without
+repairing, authenticating, or starting services.
+Stack completion alone is not readiness: inspect `sudo journalctl -u cloud-final` on failure;
+never bypass disk/signature checks or repository trust. Then follow [manual authentication](#authentication).
+UserData runs on first boot, not automatically after template updates; use a replacement test instance
+for preparation changes. The data volume retains factory home, Docker/containerd data,
+and settings/artifacts; root is disposable. Docker services require these mounts.
+For teardown, inspect `aws cloudformation list-stack-resources --stack-name software-factory`,
+then explicitly approve `npm run cdk -- destroy`. Data volumes and both ECR repositories are retained;
+inventory them before teardown and delete only individually confirmed disposable resources, if authorized.
+Retained volumes/images incur charges after deletion; no backups or cross-AZ restore are provided.
+
+## EC2 image publication
+
+Use AWS CLI and a local native ARM64 Docker engine (including a local VM) on the
+operator computer. Authenticate the approved AWS SSO profile, then publish independently:
+
+```sh
+export AWS_PROFILE=AWSAdministratorAccess-172318459814 AWS_REGION=eu-central-1 AWS_DEFAULT_REGION=eu-central-1
+./scripts/verify
+./scripts/publish-image runner runner-v1
+./scripts/publish-image agent agent-v2
+```
+
+The script checks the AWS account and native engine, builds only the requested image,
+smoke-tests it without network/credentials, then uses `aws ecr get-login-password`,
+`docker login --password-stdin`, and `docker push`. Temporary Docker login state is
+removed on exit. Agent smoke checks reuse the existing runner check through `uv`.
+OCI revision records the checkout's base commit, not uncommitted edits. Tags can change;
+use ECR digests to identify published contents. No snapshot/manifest manager, automatic
+updates, lifecycle deletion, or rollback guarantee is provided.
+
+Inspect host readiness separately with `sudo /usr/local/sbin/factory-host-check`.
+Host pulls/selection are explicit operator CLI steps, not publication side effects.
+Keep service, runner containers, and native runners stopped; pull and validate both
+chosen images before changing selection or operator TOML. Failed pulls must leave the
+prior settings intact. Never copy operator AWS credentials to EC2 or start execution
+as an installation test.
+
+Set `RUNNER_IMAGE` and `AGENT_IMAGE` to the requested ECR digest references. On EC2 as factory,
+use the prepared AWS CLI and instance role to authenticate and explicitly pull, without retaining login state:
+
+```bash
+(
+  set -euo pipefail
+  umask 077
+  DOCKER_CONFIG=$(mktemp -d)
+  export DOCKER_CONFIG
+  trap 'rm -rf -- "$DOCKER_CONFIG"' EXIT
+  aws ecr get-login-password --region eu-central-1 |
+    docker --host unix:///var/run/docker.sock login --username AWS --password-stdin \
+      172318459814.dkr.ecr.eu-central-1.amazonaws.com
+  docker --host unix:///var/run/docker.sock pull --platform linux/arm64 "${RUNNER_IMAGE:?set a runner digest reference}"
+  docker --host unix:///var/run/docker.sock pull --platform linux/arm64 "${AGENT_IMAGE:?set an agent digest reference}"
+)
+```
+
+Runner execution needs the local socket plus its supplementary GID, same-absolute-path
+workspace/artifact binds, read-only `~/.config/software-factory`, writable `~/.pi/agent`,
+and private retained logs. Do not mount ECR login state into runner/agent containers.
+
+### Stopped-host selection
+After pulling, run this as factory with the same digest references; do not start concurrently.
+It atomically records both images in `~/.config/software-factory/deployment.env`, not credentials
+or operator TOML. Before a later explicit start, set TOML `agent_image` to the recorded `AGENT_IMAGE`.
+
+```bash
+(
+  set -euo pipefail; umask 077
+  test "$(id -u):$(id -g)" = 2000:2000
+  unset DOCKER_CONTEXT; export DOCKER_HOST=unix:///var/run/docker.sock
+  # Reject active factory work or inspection errors; never stop or repair anything.
+  stopped() {
+    service=$(systemctl show software-factory.service --property=ActiveState --value)
+    case "$service" in inactive|failed) ;; *) return 1;; esac
+    containers=$(docker ps --quiet --filter 'name=^/(software-factory|factory-.*)$'); test -z "$containers"
+    if pgrep -u 2000 -f '[p]ython.*-m software_factory' >/dev/null; then return 1; else test "$?" = 1; fi
+  }
+  stopped
+  state="$HOME/.config/software-factory"
+  test ! -L "$state"; mkdir -p "$state"
+  work=$(mktemp -d "$state/.selection.XXXXXX")
+  trap 'test ! -s "$work/cid" || timeout 60s docker rm --force --volumes "$(<"$work/cid")"; rm -rf -- "$work"' EXIT
+  trap 'exit 1' HUP INT TERM
+  check='test "$(id -u):$(id -g)" = 2000:2000; test "$(uname -m)" = aarch64; python -m software_factory --help >/dev/null; gh --version; pi --version; docker compose version'
+  for image in "${RUNNER_IMAGE:?}" "${AGENT_IMAGE:?}"; do
+    [[ "$image" =~ ^172318459814[.]dkr[.]ecr[.]eu-central-1[.]amazonaws[.]com/software-factory-(runner|agent)@sha256:[a-f0-9]{64}$ ]]
+    platform=$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "$image"); test "$platform" = linux/arm64
+    timeout 60s docker run --detach --name "factory-selection-${work##*/}" --cidfile "$work/cid" --pull=never --platform linux/arm64 --network none --entrypoint sleep "$image" infinity
+    cid=$(<"$work/cid")
+    timeout 60s docker exec "$cid" sh -ec "$check"
+    if [ "$image" = "$RUNNER_IMAGE" ]; then
+      check=$(timeout 60s docker exec "$cid" python -c 'from software_factory.runner import RUNTIME_CHECK; print(RUNTIME_CHECK)')
+    fi
+    timeout 60s docker rm --force --volumes "$cid"
+    rm -- "$work/cid"
+  done
+  stopped
+  test ! -L "$state/deployment.env"; test ! -d "$state/deployment.env"
+  printf 'RUNNER_IMAGE=%s\nAGENT_IMAGE=%s\n' "$RUNNER_IMAGE" "$AGENT_IMAGE" > "$work/deployment.env"
+  mv -f -- "$work/deployment.env" "$state/deployment.env"
+)
+```
 
 ## Authentication
 
-Perform setup **inside the VM as factory**, using the provisioned tools.
+Keep private state on EC2 as factory. Use tools from the selected runner image,
+not host-installed Pi/Node/Git/gh.
 
 ### GitHub App (one-time)
 
@@ -103,16 +180,20 @@ personal `gh auth login` or inherited-token fallback.
 
 ### Pi/Copilot (one-time)
 
-1. From the factory home directory, run:
+1. As factory, open an authentication-only shell in the selected local runner image
+   (`RUNNER_IMAGE`), mounting only persistent Pi state—not Docker or workspaces:
 
    ```sh
-   cd "$HOME"
+   install -d -m 0700 "$HOME/.pi/agent"
+   docker run --rm -it --pull=never --platform linux/arm64 \
+     --mount "type=bind,src=$HOME/.pi/agent,dst=/home/factory/.pi/agent" \
+     --entrypoint sh "$RUNNER_IMAGE"
    pi --no-extensions --no-mcp --no-skills --no-context-files --no-session
    ```
 
 2. Enter `/login`, select GitHub Copilot, and follow the authorization instructions
    as `TeroTS` for this installation. Open the supplied URL on your Mac if needed.
-3. Exit Pi, then check without printing tokens:
+3. Exit Pi, then check inside that container shell without printing tokens:
 
    ```sh
    chmod 700 "$HOME/.pi/agent"
@@ -175,7 +256,7 @@ Logs are **JSON Lines on stderr**, at **INFO** by default; see
 [README](../README.md#run-the-factory) for fields. To collect them:
 
 ```sh
-uv run --frozen python -m software_factory --config /absolute/path/to/factory.toml 2>factory.jsonl
+docker logs '<confirmed-runner-container>' 2>factory.jsonl
 ```
 
 Keep collected logs private and manage retention; `2>` overwrites existing files.
@@ -192,16 +273,14 @@ files), with known-secret redaction—not a guarantee. Never publish raw transcr
 
 ## Manual inspection and recovery
 
-Run **inside the VM as factory**; replace example paths/IDs with inspected values.
+Run **on EC2 as factory**; replace example paths/IDs with inspected values.
 
 ### 1. Stop and inspect
 
-Use Ctrl-C, or find the runner PID and send SIGTERM. Wait for exit before manual
-cleanup; allow its separate **60-second cleanup budget** plus failure reporting.
+Stop the runner container through its supervisor's SIGTERM path. Wait for exit before
+manual cleanup; allow its separate **60-second cleanup budget** plus failure reporting.
 
 ```sh
-pgrep -af 'python -m software_factory'
-kill -TERM '<confirmed-runner-pid>'
 grep -F '"event": "run_started"' /absolute/path/to/factory.jsonl
 find /absolute/path/to/artifacts_dir -maxdepth 1 -type d -name 'issue-42-*' -print
 less /absolute/path/to/selected-run/run.log
@@ -270,27 +349,24 @@ Fix the cause and resolve branch/PR state before explicitly reapplying
 
 ## Docker and CLI tests
 
-Inside the provisioned VM as **factory 2000:2000**:
+On an Ubuntu ARM64 test host as **factory 2000:2000**, with Python/uv test dependencies installed
+separately (not supplied by host provisioning):
 
 ```sh
 docker build --platform linux/arm64 -t software-factory-agent:1.0.0 agent
-FACTORY_DOCKER_TESTS=1 FACTORY_AGENT_IMAGE_TESTS=1 ./scripts/verify
+docker build --platform linux/arm64 -f runner/Dockerfile -t software-factory-runner:test .
+FACTORY_DOCKER_TESTS=1 FACTORY_AGENT_IMAGE_TESTS=1 FACTORY_RUNNER_IMAGE_TESTS=1 ./scripts/verify
 ```
 
-`FACTORY_AGENT_IMAGE` selects another already-built test image. Tests exercise real
+`FACTORY_AGENT_IMAGE` and `FACTORY_RUNNER_IMAGE` select other already-built test images.
+Issue-outcome and polling E2E tests run the runner in a container and signal that container;
+unit tests may call its Python entrypoint directly. Tests exercise real
 Docker/services/Git with scripted GitHub/Pi boundaries; they are not live provider
 acceptance. [CI](../.github/workflows/verify.yml) runs as the same identity without
 host sudo. Ordinary development checks need no Docker; see [README](../README.md#development).
 
 ## Verification beyond unit tests
 
-Live GitHub/Copilot checks and privileged provisioning tests require **explicit
-operator approval**. To install/check the existing Lima VM as administrator and
-verify repeated provisioning preserves state, run from your Mac:
-
-```sh
-FACTORY_PROVISION_TESTS=1 uv run --frozen pytest tests/test_provision_lima.py -q
-```
-
-This modifies the guest but does not allocate a VM or authenticate. Linux tests
-also do not prove macOS-to-VM browser/service access; check that separately.
+Live GitHub/Copilot checks require **explicit operator approval**. EC2 preparation acceptance
+must inspect cloud-init, retained mounts, factory Docker access, and stopped runner state;
+scripted UserData tests do not prove first-boot behavior on AWS.

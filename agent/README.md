@@ -11,12 +11,13 @@ From the repository root on provisioned Ubuntu 24.04 ARM64, as `factory`
 
 ```sh
 docker build --platform linux/arm64 -t software-factory-agent:1.0.0 agent
+docker build --platform linux/arm64 -f runner/Dockerfile -t software-factory-runner:test .
 FACTORY_AGENT_IMAGE_TESTS=1 uv run --frozen pytest tests/test_startup_docker.py -q
-FACTORY_DOCKER_TESTS=1 FACTORY_AGENT_IMAGE_TESTS=1 ./scripts/verify
+FACTORY_DOCKER_TESTS=1 FACTORY_AGENT_IMAGE_TESTS=1 FACTORY_RUNNER_IMAGE_TESTS=1 ./scripts/verify
 ```
 
-Tests require an already-built image. Set `FACTORY_AGENT_IMAGE` to test a different
-local reference. GitHub/Pi authentication boundaries are scripted; no live provider
+Tests require both images already built. Set `FACTORY_AGENT_IMAGE` and
+`FACTORY_RUNNER_IMAGE` to test different local references. GitHub/Pi authentication boundaries are scripted; no live provider
 request or GitHub write is made.
 
 ## Requirements

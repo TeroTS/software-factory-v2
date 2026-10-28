@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+# Build and smoke-test one native image, then push it to ECR without retaining registry credentials.
+set -euo pipefail
+if [[ $# != 2 || ! $2 =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]]; then
+    echo 'Usage: scripts/publish-image runner|agent VERSION' >&2; exit 1
+fi
+case "$1" in
+    runner) context=.; check='python -m software_factory --help >/dev/null; gh --version; pi --version; docker compose version' ;;
+    agent) context=agent ;;
+    *) echo 'Choose runner or agent' >&2; exit 1 ;;
+esac
+cd "$(dirname "$0")/.."
+[[ $(aws sts get-caller-identity --query Account --output text) == 172318459814 ]] || {
+    echo 'AWS account must be 172318459814' >&2; exit 1;
+}
+if [[ -n ${DOCKER_CONTEXT:-} || -z ${DOCKER_HOST:-} ]]; then
+    DOCKER_HOST=$(docker context inspect --format '{{.Endpoints.docker.Host}}')
+fi
+case "$DOCKER_HOST" in unix:///*) ;; *) echo 'Use a local Unix Docker socket' >&2; exit 1 ;; esac
+export DOCKER_HOST
+unset DOCKER_CONTEXT
+case $(docker info --format '{{.OSType}}/{{.Architecture}}') in
+    linux/arm64|linux/aarch64) ;; *) echo 'Use a native linux/arm64 engine' >&2; exit 1 ;;
+esac
+image="172318459814.dkr.ecr.eu-central-1.amazonaws.com/software-factory-$1:$2"
+docker build --platform linux/arm64 --label "org.opencontainers.image.revision=$(git rev-parse HEAD)" \
+    --file "$1/Dockerfile" --tag "$image" "$context"
+[[ $(docker image inspect --format '{{.Os}}/{{.Architecture}}' "$image") == linux/arm64 ]]
+if [[ $1 == agent ]]; then
+    check=$(uv run --frozen python -c 'from software_factory.runner import RUNTIME_CHECK; print(RUNTIME_CHECK)')
+fi
+docker run --rm --pull=never --platform linux/arm64 --network none --entrypoint sh "$image" -ec \
+    'test "$(id -u):$(id -g)" = 2000:2000; test "$(uname -m)" = aarch64; '"$check"
+auth_dir=$(mktemp -d)
+trap 'rm -rf "$auth_dir"' EXIT
+export DOCKER_CONFIG="$auth_dir"
+aws ecr get-login-password | docker login --username AWS --password-stdin "${image%%/*}"
+docker push "$image"
+printf '%s\n' "$image"

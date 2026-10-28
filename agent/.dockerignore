@@ -1,0 +1,8 @@
+**
+!Dockerfile
+!pi/
+!pi/AGENTS.md
+!pi/skills/
+!pi/skills/*/
+!pi/skills/*/*.md
+!pi/skills/*/LICENSE

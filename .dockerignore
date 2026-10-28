@@ -1,0 +1,8 @@
+**
+!runner/
+!runner/Dockerfile
+!src/
+!src/software_factory/
+!src/software_factory/*.py
+**/__pycache__/
+**/*.pyc

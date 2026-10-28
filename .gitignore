@@ -1,3 +1,7 @@
+# Generated operator/development infrastructure files
+node_modules/
+infra/ec2/cdk.out/
+
 # Factory-specific private files
 .env.*
 !.env.example

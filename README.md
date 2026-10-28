@@ -6,7 +6,8 @@ CI remain required; the factory never merges.
 
 ## Development
 
-Requires Python **3.14.3**, **uv 0.5.13**, Make, a POSIX shell, and Git.
+Requires Python **3.14.3**, **uv 0.5.13**, Node **22 LTS**/npm, Make, a POSIX shell, and Git.
+Node/CDK are operator/development tools only; setup locks the local CDK CLI with `npm ci`.
 From the repository root:
 
 ```sh
@@ -16,7 +17,8 @@ uv run --frozen python -m software_factory --help
 ```
 
 Ordinary verification needs no Docker or credentials. It checks Ruff formatting,
-lint, and tests with an **80%** line/branch coverage gate, including the Pi bridge.
+lint, tests with an **80%** line/branch coverage gate (including the Pi bridge and Python CDK),
+CDK synthesis, and host-script syntax.
 
 | Command | Purpose |
 | --- | --- |
@@ -28,19 +30,16 @@ lint, and tests with an **80%** line/branch coverage gate, including the Pi brid
 
 ## Run the factory
 
-Run on provisioned **Ubuntu 24.04 LTS ARM64** as **factory 2000:2000**, with local
-native Docker/Compose, Git, `gh`, OpenSSL, curl, GitHub App credentials, and authenticated
-Pi/Copilot (tested Pi **1.3.0**). Direct macOS execution and remote Docker engines are unsupported.
-Follow [Lima host provisioning](docs/operations.md#operator-setup) or
-[EC2 host setup](docs/operations.md#ec2-host-setup), then the
-[one-time authentication setup](docs/operations.md#authentication).
-
-As `factory`, from a factory-owned checkout on the Linux disk:
-
-```sh
-./scripts/setup
-docker build --platform linux/arm64 -t software-factory-agent:1.0.0 agent
-```
+Deploy the runner **only as a container on AWS EC2**, using **Ubuntu 24.04 LTS ARM64**,
+**factory 2000:2000**, and local native Docker. CloudFormation UserData prepares retained
+storage, Docker, AWS CLI for EC2-role ECR authentication, and factory identity;
+it never authenticates or starts factory execution.
+Runner Git/`gh`/Python/Node/Pi and Compose belong in images. Private GitHub App and
+Pi/Copilot state persists outside containers. Remote Docker engines are unsupported.
+Follow [EC2 host setup](docs/operations.md#ec2-host-setup), then
+[manual authentication](docs/operations.md#authentication). No host checkout or separate
+provisioner is needed. Build/publish images on the operator computer; see
+[image publication](docs/operations.md#ec2-image-publication).
 
 Keep operator TOML outside the target checkout/workspace, for example
 `artifacts/operator/factory.toml`:
@@ -64,9 +63,10 @@ for permissions and Docker resource conventions.
 **Inspect existing trigger labels before starting:** already-labeled issues are eligible.
 Run only one runner per repository.
 
-```sh
-uv run --frozen python -m software_factory --config /absolute/path/to/factory.toml
-```
+Run the selected runner image through its explicit systemd start, with configuration,
+private state, same-path artifacts, and the local Docker socket mounted as described in
+the [operator guide](docs/operations.md#ec2-image-publication). Do not invoke host Python
+to deploy the runner.
 
 Application logs are JSON Lines on **stderr**, with **INFO** progress enabled by
 default; logging leaves stdout unused. Each record has UTC `timestamp`, `level`,
@@ -84,14 +84,16 @@ when available. Command output remains in private run logs. See
 
 ## Docker verification
 
-Inside the provisioned ARM64 guest as `factory`, after building the image:
+On an Ubuntu ARM64 test host as `factory`, with the development dependencies installed
+separately and the shared image already built:
 
 ```sh
-FACTORY_DOCKER_TESTS=1 FACTORY_AGENT_IMAGE_TESTS=1 ./scripts/verify
+docker build --platform linux/arm64 -f runner/Dockerfile -t software-factory-runner:test .
+FACTORY_DOCKER_TESTS=1 FACTORY_AGENT_IMAGE_TESTS=1 FACTORY_RUNNER_IMAGE_TESTS=1 ./scripts/verify
 ```
 
-GitHub/Pi boundaries are scripted. Live authenticated checks and privileged
-provisioning tests require explicit approval; see [extended verification](docs/operations.md#verification-beyond-unit-tests).
+GitHub/Pi boundaries are scripted. Live authenticated checks require explicit approval;
+see [extended verification](docs/operations.md#verification-beyond-unit-tests).
 
 ## Reference
 

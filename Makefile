@@ -2,6 +2,7 @@
 
 setup:
 	uv sync --locked
+	npm ci
 
 format:
 	uv run --frozen ruff format .
@@ -22,3 +23,7 @@ verify:
 	$(MAKE) format-check
 	$(MAKE) lint
 	$(MAKE) coverage
+	npm run cdk -- synth --quiet
+	bash -n infra/ec2/prepare-storage.sh
+	bash -n infra/ec2/prepare-host.sh
+	bash -n infra/ec2/check-host.sh

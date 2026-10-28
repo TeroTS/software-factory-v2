@@ -1,0 +1,4 @@
+{
+  "app": "uv run --frozen python -m infra.ec2.app",
+  "output": "infra/ec2/cdk.out"
+}

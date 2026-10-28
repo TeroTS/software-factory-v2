@@ -2,18 +2,24 @@
 
 ## Build and update
 
-From a factory-owned checkout inside the provisioned Ubuntu 24.04 ARM64 VM,
+From a factory-owned checkout on an Ubuntu 24.04 ARM64 test host,
 logged in as **factory 2000:2000**:
 
 ```sh
 docker build --platform linux/arm64 -t software-factory-agent:1.0.0 agent
+docker build --platform linux/arm64 -f runner/Dockerfile -t software-factory-runner:test .
 FACTORY_AGENT_IMAGE_TESTS=1 uv run --frozen pytest tests/test_startup_docker.py -q
 ```
+
+EC2 operators may [publish through ECR](operations.md#ec2-image-publication) and explicitly pull on the host
+instead. Runner and agent tags/commits are independent: the runner supplies the bridge;
+the agent supplies its tools, instructions, and skills. No new compatibility negotiation
+or rollback/retention guarantee is provided.
 
 The operator builds; the runner never builds/pulls or selects an emulation fallback.
 Startup pins the local tag to an immutable image ID. **Rebuild and restart** after
 changing tools, instructions, or skills; existing containers do not adopt updates.
-`FACTORY_AGENT_IMAGE` selects another already-built test image.
+`FACTORY_AGENT_IMAGE` and `FACTORY_RUNNER_IMAGE` select other already-built test images.
 
 ## Pinned baseline
 

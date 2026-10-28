@@ -1,10 +1,66 @@
 import json
 import os
 import subprocess
-import sys
+import uuid
+from contextlib import contextmanager
 from pathlib import Path
 
 IMAGE = os.environ.get("FACTORY_AGENT_IMAGE", "software-factory-agent:1.0.0")
+
+
+@contextmanager
+def runner_container(config: Path, stderr):
+    directory = config.parent
+    home = directory / "home"
+    credentials = home / ".config/software-factory"
+    socket = Path("/var/run/docker.sock")
+    name = "factory-runner-test-" + uuid.uuid4().hex
+    subprocess.run(
+        [
+            "docker",
+            "create",
+            "--name",
+            name,
+            "--pull=never",
+            "--platform",
+            "linux/arm64",
+            "--init",
+            "--network",
+            "none",
+            "--label",
+            "software-factory.runner=true",
+            "--group-add",
+            str(os.stat(socket).st_gid),
+            "--mount",
+            f"type=bind,src={socket},dst={socket}",
+            "--mount",
+            f"type=bind,src={directory},dst={directory}",
+            "--mount",
+            f"type=bind,src={credentials},dst={credentials},readonly",
+            "--env",
+            f"HOME={home}",
+            "--env",
+            "DOCKER_HOST=unix:///var/run/docker.sock",
+            "--env",
+            f"PATH={directory / 'tools'}:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+            os.environ.get("FACTORY_RUNNER_IMAGE", "software-factory-runner:test"),
+            "--config",
+            str(config),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    try:
+        process = subprocess.Popen(["docker", "start", "--attach", name], stdout=subprocess.DEVNULL, stderr=stderr)
+        try:
+            yield process, name
+        finally:
+            if process.poll() is None:
+                subprocess.run(["docker", "kill", "--signal", "TERM", name], capture_output=True)
+            process.wait(timeout=120)
+    finally:
+        subprocess.run(["docker", "rm", "--force", name], check=True, capture_output=True)
 
 
 def app_credentials(home: Path, tools: Path) -> None:
@@ -22,7 +78,7 @@ def app_credentials(home: Path, tools: Path) -> None:
     key.chmod(0o600)
     curl = tools / "curl"
     curl.write_text(
-        f"#!{sys.executable}\n"
+        "#!/usr/bin/env python3\n"
         "import datetime, json, os, sys\n"
         "settings = {k: json.loads(v) for k,v in (line.split(' = ',1) for line in sys.stdin.read().splitlines())}\n"
         "assert settings['url'] == 'https://api.github.com/app/installations/456/access_tokens'\n"

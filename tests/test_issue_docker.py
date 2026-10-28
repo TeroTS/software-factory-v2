@@ -2,16 +2,13 @@ import json
 import os
 import re
 import shutil
-import signal
 import subprocess
-import sys
 import time
 from pathlib import Path
 
 import pytest
-from tests_support import IMAGE, app_credentials, target_repository
+from tests_support import IMAGE, app_credentials, runner_container, target_repository
 
-ROOT = Path(__file__).resolve().parents[1]
 pytestmark = [
     pytest.mark.docker,
     pytest.mark.skipif(
@@ -22,7 +19,7 @@ pytestmark = [
 
 
 @pytest.mark.parametrize("outcome", ["success", "interruption", "inaccessible-file", "inaccessible-directory"])
-def test_operator_labels_issue_and_observes_real_cli_docker_outcome(tmp_path: Path, outcome: str) -> None:
+def test_operator_labels_issue_and_observes_runner_container_outcome(tmp_path: Path, outcome: str) -> None:
     source = tmp_path / "source"
     target_repository(source)
     if outcome == "interruption":
@@ -53,8 +50,8 @@ def test_operator_labels_issue_and_observes_real_cli_docker_outcome(tmp_path: Pa
     state_file.write_text(json.dumps({"queued": True, "comments": [], "pr": None}))
     gh = tools / "gh"
     gh.write_text(
-        f"#!{sys.executable}\n"
-        + f"STATE={str(state_file)!r}\nREMOTE={str(remote)!r}\nGIT={real_git!r}\n"
+        "#!/usr/bin/env python3\n"
+        + f"STATE={str(state_file)!r}\nREMOTE={str(remote)!r}\nGIT='/usr/bin/git'\n"
         + f"STDERR={str(tmp_path / 'stderr')!r}\n"
         + """
 import json, os, pathlib, re, subprocess, sys
@@ -109,11 +106,11 @@ print(json.dumps(result))
     gh.chmod(0o755)
     git = tools / "git"
     git.write_text(
-        f"#!{sys.executable}\nimport os, sys\n"
+        "#!/usr/bin/env python3\nimport os, sys\n"
         + "assert os.environ['GH_TOKEN'] == 'fixture-installation-token'\n"
-        + f"args = [{real_git!r}, *sys.argv[1:]]\n"
+        + "args = ['/usr/bin/git', *sys.argv[1:]]\n"
         + f"args = [{str(remote)!r} if x == 'https://github.com/owner/repo.git' else x for x in args]\n"
-        + f"os.execv({real_git!r}, args)\n"
+        + "os.execv('/usr/bin/git', args)\n"
     )
     git.chmod(0o755)
     pi = tools / "pi"
@@ -128,44 +125,24 @@ print(json.dumps(result))
     previous.mkdir(parents=True)
     (previous / "run.log").write_text("previous private diagnostics\n")
     output = tmp_path / "stderr"
-    with output.open("w") as stderr:
-        process = subprocess.Popen(
-            [sys.executable, "-m", "software_factory", "--config", str(config)],
-            cwd=ROOT,
-            env={
-                **os.environ,
-                "HOME": str(home),
-                "DOCKER_CONFIG": os.environ.get("DOCKER_CONFIG", str(Path.home() / ".docker")),
-                "PATH": str(tools) + os.pathsep + os.environ["PATH"],
-            },
-            stderr=stderr,
-            stdout=subprocess.DEVNULL,
-        )
-        try:
-            deadline = time.monotonic() + 120
-            while time.monotonic() < deadline:
-                state = json.loads(state_file.read_text())
-                directories = [p for p in previous.parent.iterdir() if p != previous]
-                if outcome == "interruption" and directories and (directories[0] / "workspace/setup-ready").exists():
-                    process.send_signal(signal.SIGTERM)
-                    break
-                failed = any(message.startswith("Failed:") for message in state["comments"])
-                succeeded = any(message.startswith("Succeeded:") for message in state["comments"])
-                # The success comment precedes optional artifact removal; do not interrupt that removal ourselves.
-                if failed or (succeeded and not directories):
-                    break
-                assert process.poll() is None, output.read_text()
-                time.sleep(0.1)
-            else:
-                pytest.fail("CLI did not finish the fixture run: " + output.read_text())
-        finally:
-            if process.poll() is None and outcome != "interruption":
-                process.send_signal(signal.SIGTERM)
-            try:
-                process.wait(timeout=30)
-            except subprocess.TimeoutExpired:
-                process.send_signal(signal.SIGTERM)
-                process.wait(timeout=30)
+    with output.open("w") as stderr, runner_container(config, stderr) as (process, name):
+        deadline = time.monotonic() + 120
+        while time.monotonic() < deadline:
+            state = json.loads(state_file.read_text())
+            directories = [p for p in previous.parent.iterdir() if p != previous]
+            if outcome == "interruption" and directories and (directories[0] / "workspace/setup-ready").exists():
+                subprocess.run(["docker", "kill", "--signal", "TERM", name], check=True, capture_output=True)
+                process.wait(timeout=120)
+                break
+            failed = any(message.startswith("Failed:") for message in state["comments"])
+            succeeded = any(message.startswith("Succeeded:") for message in state["comments"])
+            # The success comment precedes optional artifact removal; do not interrupt that removal ourselves.
+            if failed or (succeeded and not directories):
+                break
+            assert process.poll() is None, output.read_text()
+            time.sleep(0.1)
+        else:
+            pytest.fail("Runner container did not finish the fixture run: " + output.read_text())
     state = json.loads(state_file.read_text())
     assert process.returncode == 130, output.read_text()
     assert not state["queued"]

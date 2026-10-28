@@ -1,9 +1,0 @@
-#!/bin/sh
-# Bootstrap explicit host provisioning/checks with Ubuntu's system Python, before project setup.
-set -eu
-if [ "$(uname -s)" != Linux ]; then
-    printf '%s\n' 'Host provisioning requires Ubuntu 24.04 ARM64 Linux; run it inside the authorized host.' >&2
-    exit 1
-fi
-root=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
-exec /usr/bin/python3 -I -c 'import sys; sys.path.insert(0, sys.argv.pop(1)); from software_factory.provision import main; raise SystemExit(main())' "$root/src" "$@"
