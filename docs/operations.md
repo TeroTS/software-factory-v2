@@ -243,11 +243,24 @@ Command output stays in retained `/home/factory/artifacts/issue-*/run.log` diagn
 Logs survive container replacement, are not recovery state and are never implicitly deleted.
 [logging.ini](../logging.ini) provides equivalent development defaults.
 
+## Stop for maintenance
+
+Prefer stopping while idle using [health evidence](#operational-health); this is not race-free draining.
+Stopping during a run interrupts it. From administrative SSM, wait for the bounded stop:
+
+```sh
+sudo systemctl stop software-factory.service
+```
+
+Docker allows 120 seconds, including the runner's 60-second cleanup budget; systemd allows 150.
+Then inspect [service/log evidence](#operational-health): expect stopped state and `runner_interrupted`
+(exit 130 is accepted). Stop/cleanup errors or missing evidence require intervention, not forced removal.
+Service exit alone does not prove resource cleanup; retain failed diagnostics and follow recovery below.
+Do not automatically restart, requeue or resume interrupted work.
+
 ## Manual inspection and recovery
 
-1. **Stop through systemd's interruption path and wait before cleanup.** Prefer idle periods, but
-   idle inspection is not race-free draining. Docker stop allows 120 seconds, including the runner's
-   60-second cleanup budget; the supervisor allows 150 seconds. Service exit does not prove cleanup.
+1. **[Stop](#stop-for-maintenance) and wait before manual cleanup.**
 2. **Inspect retained evidence as factory.** `run_started`/`diagnostics_retained` name the issue,
    run identity and private directory. Never execute retained workspace scripts on the host.
 3. **Identify leftovers using the startup Docker endpoint.** Explicit `DOCKER_CONTEXT` overrides

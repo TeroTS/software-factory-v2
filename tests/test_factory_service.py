@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import subprocess
 from pathlib import Path
 
@@ -134,6 +135,7 @@ def test_service_is_manual_only_and_allows_bounded_cleanup() -> None:
     assert "ExecStopPost=/usr/local/sbin/factory-stop-runner" in unit
     assert "TimeoutStopSec=150" in unit
     assert "KillMode=process" in unit
+    assert "SuccessExitStatus=130" in unit
 
 
 @pytest.mark.parametrize("state", ["owned", "absent", "invalid", "stop-failed"])
@@ -141,27 +143,40 @@ def test_stop_only_targets_the_service_owned_container(tmp_path: Path, state: st
     cid = tmp_path / "runner.cid"
     if state != "absent":
         cid.write_text(("--not-a-container" if state == "invalid" else "a" * 64) + "\n")
+    retained = tmp_path / "previous-failure/run.log"
+    retained.parent.mkdir()
+    retained.write_text("private retained diagnostics")
+    unrelated = tmp_path / "unrelated-container"
+    unrelated.write_text("running")
+    section = (ROOT / "docs/operations.md").read_text().split("## Stop for maintenance\n", 1)[1].split("\n## ", 1)[0]
+    blocks = re.findall(r"```sh\n(.*?)```", section, re.DOTALL)
+    assert len(blocks) == 1
     marker = tmp_path / "stopped"
-    result = subprocess.run(
-        [
-            "bash",
-            "-c",
-            'docker() { printf "%s\\n" "$*" > "$MARKER"; test "$STATE" != stop-failed; }; '
-            'export -f docker; source "$STOPPER"',
-        ],
-        env={
-            **os.environ,
-            "RUNTIME_DIRECTORY": str(tmp_path),
-            "MARKER": str(marker),
-            "STATE": state,
-            "STOPPER": str(SCRIPTS / "stop-runner.sh"),
-        },
-        capture_output=True,
-        text=True,
-        timeout=10,
-    )
+    harness = """
+sudo() {
+  test "$*" = 'systemctl stop software-factory.service' || return 99
+  bash "$STOPPER"
+}
+docker() { printf '%s\\n' "$*" >> "$MARKER"; test "$STATE" != stop-failed; }
+export -f docker
+"""
+    command = ["bash", "-c", harness + blocks[0]]
+    env = {
+        **os.environ,
+        "RUNTIME_DIRECTORY": str(tmp_path),
+        "MARKER": str(marker),
+        "STATE": state,
+        "STOPPER": str(SCRIPTS / "stop-runner.sh"),
+    }
+    result = subprocess.run(command, env=env, capture_output=True, text=True, timeout=10)
     assert (result.returncode == 0) is (state in {"owned", "absent"})
     assert marker.exists() is (state in {"owned", "stop-failed"})
     if marker.exists():
         assert marker.read_text().strip() == "--host unix:///var/run/docker.sock stop --time 120 " + "a" * 64
     assert cid.exists() is (state in {"invalid", "stop-failed"})
+    if result.returncode == 0:
+        again = subprocess.run(command, env=env, capture_output=True, text=True, timeout=10)
+        assert again.returncode == 0
+        assert not marker.exists() or len(marker.read_text().splitlines()) == 1
+    assert retained.read_text() == "private retained diagnostics"
+    assert unrelated.read_text() == "running"

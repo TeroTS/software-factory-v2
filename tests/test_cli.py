@@ -2,6 +2,7 @@ import json
 import signal
 import subprocess
 import sys
+import time
 from pathlib import Path
 from unittest.mock import Mock
 
@@ -134,3 +135,39 @@ def test_cli_validates_selected_agent_before_preflight(tmp_path: Path, monkeypat
         startup.assert_not_called()
         runner.run.assert_not_called()
         assert "agent_image must match the selected AGENT_IMAGE" in caplog.text
+
+
+def test_real_sigterm_stops_idle_runner_with_retained_interruption_evidence(tmp_path: Path) -> None:
+    config = tmp_path / "factory.toml"
+    config.write_text('repository="owner/repo"\nmodel="chosen"\nagent_image="agent:local"\n')
+    log = tmp_path / "runner.log"
+    script = (
+        "import time; from unittest.mock import patch; "
+        "from software_factory.__main__ import main; "
+        "from software_factory.runner import AgentRuntime; "
+        "startup = patch('software_factory.__main__.preflight', "
+        "return_value=AgentRuntime('sha256:resolved', 'unix:///local.sock')); startup.start(); "
+        "poll = patch('software_factory.runner.Runner.poll_once', side_effect=lambda: time.sleep(60)); poll.start(); "
+        "raise SystemExit(main())"
+    )
+    with log.open("w") as stderr:
+        process = subprocess.Popen(
+            [sys.executable, "-c", script, "--config", str(config)], stdout=subprocess.PIPE, stderr=stderr
+        )
+        try:
+            deadline = time.monotonic() + 10
+            while '"event": "runner_polling"' not in log.read_text():
+                assert process.poll() is None, log.read_text()
+                assert time.monotonic() < deadline, "Runner did not reach idle polling"
+                time.sleep(0.01)
+            process.terminate()
+            stdout, _ = process.communicate(timeout=10)
+            assert process.returncode == 130
+            assert stdout == b""
+        finally:
+            if process.poll() is None:
+                process.kill()
+                process.wait(timeout=10)
+    events = [json.loads(line)["event"] for line in log.read_text().splitlines()]
+    assert events == ["runner_polling", "runner_interrupted"]
+    assert config.read_text() == 'repository="owner/repo"\nmodel="chosen"\nagent_image="agent:local"\n'
