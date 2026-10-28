@@ -120,16 +120,17 @@ print(json.dumps(result))
     )
     pi.chmod(0o755)
     config = tmp_path / "operator.toml"
-    config.write_text(f'repository="owner/repo"\nmodel="chosen"\nagent_image="{IMAGE}"\nartifacts_dir="runs"\n')
-    previous = tmp_path / "runs/issue-1-previous-failure"
+    config.write_text(f'repository="owner/repo"\nmodel="chosen"\nagent_image="{IMAGE}"\n')
+    previous = Path("/home/factory/artifacts") / f"issue-1-previous-failure-{tmp_path.name}"
     previous.mkdir(parents=True)
     (previous / "run.log").write_text("previous private diagnostics\n")
+    baseline = set(previous.parent.iterdir())
     output = tmp_path / "stderr"
     with output.open("w") as stderr, runner_container(config, stderr) as (process, name):
         deadline = time.monotonic() + 120
         while time.monotonic() < deadline:
             state = json.loads(state_file.read_text())
-            directories = [p for p in previous.parent.iterdir() if p != previous]
+            directories = [p for p in previous.parent.iterdir() if p not in baseline]
             if outcome == "interruption" and directories and (directories[0] / "workspace/setup-ready").exists():
                 subprocess.run(["docker", "kill", "--signal", "TERM", name], check=True, capture_output=True)
                 process.wait(timeout=120)
@@ -161,7 +162,7 @@ print(json.dumps(result))
             == "service-written"
         )
         assert state["payload"]["draft"] is True
-        assert list(previous.parent.iterdir()) == [previous]
+        assert set(previous.parent.iterdir()) == baseline
     else:
         assert state["pr"] is None
         if outcome == "interruption":
@@ -176,7 +177,7 @@ print(json.dumps(result))
                 ).returncode
                 != 0
             )
-        directory = next(p for p in previous.parent.iterdir() if p != previous)
+        directory = next(p for p in previous.parent.iterdir() if p not in baseline)
         assert directory.stat().st_mode & 0o777 == 0o700
         assert (directory / "run.log").stat().st_mode & 0o777 == 0o600
         assert not (directory / "workspace/too-late").exists()

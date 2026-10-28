@@ -1,0 +1,29 @@
+# Supervise one explicitly started selected runner; never enable/restart it.
+# Retained private logs and existing polling events, not liveness, establish startup success.
+[Unit]
+Description=Autonomous coding factory (explicit operator start only)
+Requires=docker.service
+After=docker.service
+RequiresMountsFor=/home/factory /var/lib/docker /var/lib/containerd
+
+[Service]
+Type=notify
+NotifyAccess=all
+TimeoutStartSec=300
+RuntimeDirectory=software-factory
+RuntimeDirectoryMode=0700
+User=factory
+Group=factory
+SupplementaryGroups=docker
+Environment=HOME=/home/factory
+EnvironmentFile=/home/factory/.config/software-factory/deployment.env
+UMask=0077
+ExecStart=/usr/local/sbin/factory-start-runner
+ExecStop=/usr/local/sbin/factory-stop-runner
+ExecStopPost=/usr/local/sbin/factory-stop-runner
+TimeoutStopSec=150
+KillMode=process
+Restart=no
+SuccessExitStatus=130
+StandardOutput=null
+StandardError=journal

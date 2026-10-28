@@ -31,9 +31,11 @@ CDK synthesis, and host-script syntax.
 ## Run the factory
 
 Deploy the runner **only as a container on AWS EC2**, using **Ubuntu 24.04 LTS ARM64**,
-**factory 2000:2000**, and local native Docker. CloudFormation UserData prepares retained
-storage, Docker, AWS CLI for EC2-role ECR authentication, and factory identity;
-it never authenticates or starts factory execution.
+**factory 2000:2000**, and local native Docker. A separate disposable CDK builder bakes
+host prerequisites/service files into a private AMI, using a fresh builder instance for each bake.
+A persistent shared-network stack supplies the VPC/subnet/internet gateway to both builder and factory;
+only the builder stack is recreated between bakes. Operational UserData mounts retained
+storage before starting Docker; it never installs packages, authenticates or starts factory execution.
 Runner Git/`gh`/Python/Node/Pi and Compose belong in images. Private GitHub App and
 Pi/Copilot state persists outside containers. Remote Docker engines are unsupported.
 Follow [EC2 host setup](docs/operations.md#ec2-host-setup), then
@@ -41,19 +43,19 @@ Follow [EC2 host setup](docs/operations.md#ec2-host-setup), then
 provisioner is needed. Build/publish images on the operator computer; see
 [image publication](docs/operations.md#ec2-image-publication).
 
-Keep operator TOML outside the target checkout/workspace, for example
-`artifacts/operator/factory.toml`:
+Keep operator TOML outside the target checkout/workspace at
+`/home/factory/.config/software-factory/factory.toml`:
 
 ```toml
 repository = "TeroTS/factory-smoke-test"
 model = "gpt-6.1-sol"
 agent_image = "software-factory-agent:1.0.0"
-artifacts_dir = "../runs"
 ```
 
-Exactly these four fields are required. Use an accessible Copilot model ID;
-relative artifact paths resolve against the TOML directory. Never put credentials
-in this file.
+Exactly these three fields are required. Artifacts use fixed retained `/home/factory/artifacts`,
+mounted at the same path inside the runner. Remove the old `artifacts_dir` field explicitly;
+prior diagnostics stay where they were. Rebuild/select the changed runner image before using
+this configuration. Use an accessible Copilot model ID; never put credentials in this file.
 
 The target repository must already provide executable, noninteractive
 `./scripts/setup` and `./scripts/verify`; verification must match target CI.
@@ -65,7 +67,7 @@ Run only one runner per repository.
 
 Run the selected runner image through its explicit systemd start, with configuration,
 private state, same-path artifacts, and the local Docker socket mounted as described in
-the [operator guide](docs/operations.md#ec2-image-publication). Do not invoke host Python
+the [explicit start procedure](docs/operations.md#explicit-start). Do not invoke host Python
 to deploy the runner.
 
 Application logs are JSON Lines on **stderr**, with **INFO** progress enabled by

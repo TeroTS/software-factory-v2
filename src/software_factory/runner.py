@@ -126,7 +126,7 @@ def preflight(config: Config) -> AgentRuntime:
             probe.flush()
     except OSError:
         raise FactoryError(
-            "artifacts_dir must be a readable/writable directory; check its path and permissions"
+            "Artifacts directory must be readable/writable; check /home/factory/artifacts mounts and permissions"
         ) from None
     for tool in ("git", "gh", "docker", "pi", "openssl", "curl"):
         if shutil.which(tool) is None:

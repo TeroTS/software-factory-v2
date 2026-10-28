@@ -13,6 +13,18 @@ persist_mount() {
   if [ -z "$existing" ]; then printf '%s\n' "$entry" >> /etc/fstab; fi
 }
 
+# Install identical bake/boot guards; engines must see real retained mounts even when fstab is missing or fails.
+install_storage_guards() {
+  local service directory expected file
+  for service in docker containerd; do
+    directory=/etc/systemd/system/$service.service.d
+    mkdir -p "$directory"
+    expected=$(printf '[Unit]\nRequiresMountsFor=/srv/software-factory /var/lib/docker /var/lib/containerd\n[Service]\nExecStartPre=/usr/bin/mountpoint -q /srv/software-factory\nExecStartPre=/usr/bin/mountpoint -q /var/lib/docker\nExecStartPre=/usr/bin/mountpoint -q /var/lib/containerd\n')
+    file=$directory/factory-storage.conf
+    if [ -e "$file" ]; then test ! -L "$file"; test "$(<"$file")" = "$expected"; else printf '%s\n' "$expected" > "$file"; fi
+  done
+}
+
 # Identify only the stack data volume, format only blank media, and mount persistent state before Docker.
 prepare_storage() {
   volume=${1:?expected stack data volume ID}
@@ -56,13 +68,7 @@ prepare_storage() {
     fi
     persist_mount "$source" "$target" none bind,nofail,x-systemd.requires-mounts-for=/srv/software-factory 0 0
   done
-  for service in docker containerd; do
-    directory=/etc/systemd/system/$service.service.d
-    mkdir -p "$directory"
-    expected=$(printf '[Unit]\nRequiresMountsFor=/srv/software-factory /var/lib/docker /var/lib/containerd\n')
-    file=$directory/factory-storage.conf
-    if [ -e "$file" ]; then test ! -L "$file"; test "$(<"$file")" = "$expected"; else printf '%s\n' "$expected" > "$file"; fi
-  done
+  install_storage_guards
   systemctl daemon-reload
 }
 

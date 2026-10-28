@@ -237,7 +237,7 @@ def test_invalid_copilot_authentication_does_not_expose_token_or_start_container
 def test_artifact_root_file_is_rejected_without_touching_existing_contents(startup) -> None:
     config, commands, _ = startup
     config.artifacts_dir.write_text("previous diagnostics")
-    with pytest.raises(FactoryError, match="artifacts_dir"):
+    with pytest.raises(FactoryError, match="Artifacts directory"):
         preflight(config)
     assert config.artifacts_dir.read_text() == "previous diagnostics"
     commands.run.assert_not_called()
@@ -245,7 +245,7 @@ def test_artifact_root_file_is_rejected_without_touching_existing_contents(start
 
 def test_artifact_probe_failure_is_safe(startup, monkeypatch) -> None:
     monkeypatch.setattr("software_factory.runner.tempfile.TemporaryFile", Mock(side_effect=PermissionError("secret")))
-    with pytest.raises(FactoryError, match="artifacts_dir") as failure:
+    with pytest.raises(FactoryError, match="Artifacts directory") as failure:
         preflight(startup[0])
     assert "secret" not in str(failure.value)
 

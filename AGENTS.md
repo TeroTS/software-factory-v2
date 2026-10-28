@@ -25,7 +25,7 @@ shared-image startup, polls GitHub, and executes issue runs.
 GitHub holds durable coordination; no database or HTTP API exists. The same runner
 runs only in a runner container on a CloudFormation-prepared Ubuntu ARM64 EC2 host.
 
-- `src/software_factory/__main__.py`, `config.py`: terminal CLI, signals, four-field TOML.
+- `src/software_factory/__main__.py`, `config.py`: terminal CLI, signals, three-field TOML.
 - `runner.py`: native image/engine preflight, serial issue coordination, cleanup/publication gates.
 - `agent/`: factory-maintained pinned shared-image build definition and instructions.
 - `auth.py`: private host GitHub App credentials and scoped token renewal.
@@ -35,8 +35,9 @@ runs only in a runner container on a CloudFormation-prepared Ubuntu ARM64 EC2 ho
 - `tests/`: pytest unit, real local Git/process/Docker, scripted external-boundary CLI E2E;
   `tests/test_agent_wrapper.py` exercises the standalone Python bridge and measures its coverage.
 - `scripts/`, `Makefile`, `.github/workflows/verify.yml`: development entrypoints and CI.
-- `infra/ec2/`: Python CDK stack and file-based shell UserData embedded at synthesis;
-  retained storage must be ready before Docker installation/start. No separate host provisioner
+- `infra/ec2/`: persistent shared-network Python CDK stack plus separate AMI-builder/operational stacks; baked host scripts
+  live under `infra/ec2/scripts/` and the systemd unit stays in `infra/ec2/`;
+  installation belongs to baking; retained storage must be ready before Docker starts. No separate host provisioner
   or hand-maintained CloudFormation template. Node/CDK are development/operator tools only.
 
 ## Development workflow
@@ -61,10 +62,10 @@ runs only in a runner container on a CloudFormation-prepared Ubuntu ARM64 EC2 ho
 - Runtime invocation inside the selected runner container: `python -m software_factory --config /absolute/path/to/factory.toml`.
   Inspect trigger labels before starting/upgrading: already-labeled issues are
   eligible for execution. Verification failures end the run without automatic repair.
-- Operator TOML requires exactly `repository`, `model`, `agent_image`, and
-  `artifacts_dir`; no credentials/defaults. Relative artifact paths resolve against
-  the TOML; model IDs exactly match an accessible `github-copilot` model. Reject
-  legacy Compose fields with migration guidance; never automatically migrate.
+- Operator TOML requires exactly `repository`, `model`, `agent_image`; no credentials/defaults.
+  Artifacts are fixed at `/home/factory/artifacts`, bound at the same path. Reject removed
+  `artifacts_dir` and legacy Compose fields with migration guidance; never automatically migrate.
+  Model IDs exactly match an accessible `github-copilot` model; startup preserves selected-agent matching.
 - Runner execution requires the provisioned Ubuntu 24.04 LTS ARM64 Linux host
   and effective factory UID/GID 2000:2000. Deployment is container-only on AWS EC2:
   validate actual Docker/account host preparation separately;
@@ -76,7 +77,13 @@ runs only in a runner container on a CloudFormation-prepared Ubuntu ARM64 EC2 ho
   Host preparation includes AWS CLI from its approved upstream installer and signed Ubuntu prerequisites for
   EC2-role ECR authentication, not runner execution; never save operator AWS credentials.
   Host provisioning must not install runner toolchains, modify login profiles, or
-  remove existing tools/data. CloudFormation UserData owns host preparation, with read-only readiness inspection.
+  remove existing tools/data. Keep shared networking across bakes; destroy/recreate only the builder stack
+  for a fresh instance/root disk each time. Consumer stacks own separate security groups/IAM roles.
+  A disposable builder bakes host prerequisites/helpers/service files;
+  operator AWS CLI captures the private AMI outside CloudFormation lifecycle. Builder-stack destruction
+  must preserve the AMI/backing snapshot. Operational UserData supplies only boot inputs;
+  storage-first startup and read-only readiness remain fail-closed. Never bake private/deployment
+  state; rebuilding a helper requires a tested AMI and explicit stopped-host replacement.
   No Lima/local-host deployment or separate Python host provisioner. Initial authentication/
   access approval is manual. Repository API and HTTPS Git use the same App identity,
   never saved personal login or inherited-token fallback. Preserve private host-file
@@ -98,8 +105,8 @@ runs only in a runner container on a CloudFormation-prepared Ubuntu ARM64 EC2 ho
   engine-supported emulation. No remote engine, automatic shared-image build/pull,
   or factory-selected emulation fallback.
 - Keep operator TOML outside the target checkout and future run workspace, e.g.
-  ignored `artifacts/operator/factory.toml`. Artifacts use configured `artifacts_dir`
-  with no default; never move/delete previous diagnostics implicitly. Use fresh
+  `/home/factory/.config/software-factory/factory.toml`. Artifacts use fixed retained
+  `/home/factory/artifacts`; never move/delete previous diagnostics implicitly. Use fresh
   private run directories and host-usable files. Targets supply ordinary services, not
   target-specific factory agent images or Compose profiles.
 - Use standard-library runner logging: INFO by default as JSON Lines to stderr,

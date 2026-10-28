@@ -36,6 +36,8 @@ def runner_container(config: Path, stderr):
             "--mount",
             f"type=bind,src={directory},dst={directory}",
             "--mount",
+            "type=bind,src=/home/factory/artifacts,dst=/home/factory/artifacts",
+            "--mount",
             f"type=bind,src={credentials},dst={credentials},readonly",
             "--env",
             f"HOME={home}",

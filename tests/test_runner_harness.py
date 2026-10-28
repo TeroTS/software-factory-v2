@@ -25,6 +25,7 @@ def test_runner_harness_uses_container_mounts_and_container_signals(tmp_path, mo
         assert create[-3:] == ["runner:test", "--config", str(config)]
         assert create[create.index("--group-add") + 1] == "988"
         assert f"type=bind,src={tmp_path},dst={tmp_path}" in create
+        assert "type=bind,src=/home/factory/artifacts,dst=/home/factory/artifacts" in create
         credentials = tmp_path / "home/.config/software-factory"
         assert f"type=bind,src={credentials},dst={credentials},readonly" in create
         assert "--pull=never" in create

@@ -1,25 +1,22 @@
 #!/bin/bash
-# Prepare a supported EC2 host on first boot using the stack volume ID in $1:
-# mount retained storage first, establish factory 2000:2000, install Docker and
-# the official AWS ARM64 CLI, and check readiness for execution and EC2-role pulls.
-# Fail visibly on conflicts; leave credential enrollment and factory starts manual.
+# Install only generic host prerequisites on a disposable Ubuntu ARM64 builder;
+# mask engines before package installation, record provenance and leave capture explicit.
 set -euo pipefail
-set -E
 umask 077
 export PATH=/usr/sbin:/usr/bin:/sbin:/bin
 export DEBIAN_FRONTEND=noninteractive
-trap 'echo "EC2 host preparation failed at line $LINENO; inspect cloud-init logs" >&2' ERR
-# Reject an unsupported AMI/account context before touching storage or installing packages.
+
+# Reject unsupported hosts or active execution before installing anything.
 validate_host() {
   test "$(id -u)" = 0
   test "$(uname -s):$(uname -m)" = Linux:aarch64
   . /etc/os-release
   test "$ID:$VERSION_ID" = ubuntu:24.04
   for service in software-factory docker containerd; do
-    if systemctl is-active --quiet "$service"; then echo "refusing preparation with active $service" >&2; exit 1; fi
+    if systemctl is-active --quiet "$service"; then echo "refusing bake with active $service" >&2; exit 1; fi
   done
 }
-# Create fixed factory identity without moving home data, renumbering accounts, or granting host sudo.
+# Create fixed factory identity without moving home data, renumbering accounts or granting host sudo.
 ensure_account() {
   local key entry name password uid gid rest home shell
   for key in factory 2000; do
@@ -37,8 +34,8 @@ ensure_account() {
     useradd --uid 2000 --gid 2000 --no-create-home --home-dir /home/factory --shell /bin/bash factory
   fi
 }
-# Install signed Docker packages and AWS's HTTPS CLI installer; fail before readiness on tool/download errors.
-install_docker() {
+# Install signed Docker packages and AWS's approved HTTPS installer without starting engines; discard temporary files.
+install_docker() (
   work=$(mktemp -d)
   trap 'rm -rf -- "$work"' EXIT
   chmod 0755 "$work"
@@ -51,7 +48,7 @@ install_docker() {
   apt-get "${options[@]}" install --yes --no-remove --no-install-recommends sudo curl ca-certificates gnupg unzip
   for destination in /usr/local/aws-cli /usr/bin/aws /usr/bin/aws_completer; do
     if test -e "$destination" || test -L "$destination"; then
-      echo 'refusing to overwrite an existing AWS CLI path; inspect the host' >&2; exit 1
+      echo 'refusing to overwrite an existing AWS CLI path; inspect the builder' >&2; exit 1
     fi
   done
   curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' --connect-timeout 15 --max-time 180 --output "$work/awscliv2.zip" https://awscli.amazonaws.com/awscli-exe-linux-aarch64.zip
@@ -70,16 +67,30 @@ install_docker() {
   apt-get "${options[@]}" update
   apt-get "${options[@]}" install --yes --no-remove --no-install-recommends docker-ce docker-ce-cli containerd.io
   usermod --append --groups docker factory
-  systemctl enable --now docker
-}
-# Prepare this EC2 host in storage-first order; failure prevents the readiness report.
-prepare_host() {
+)
+# Bake guarded tools/files and public provenance only; failures never mark the builder ready for finalization.
+bake_host() {
   validate_host
-  systemctl start snap.amazon-ssm-agent.amazon-ssm-agent.service
-  /usr/local/sbin/factory-prepare-storage "${1:?expected stack data volume ID}"
+  systemctl enable --now snap.amazon-ssm-agent.amazon-ssm-agent.service
+  : "${FACTORY_PARENT_AMI:?}" "${FACTORY_SOURCE_REVISION:?}"
+  test ! -e /usr/sbin/policy-rc.d; test ! -L /usr/sbin/policy-rc.d
+  systemctl mask docker.service docker.socket containerd.service
+  source /usr/local/sbin/factory-prepare-storage
+  install_storage_guards
+  printf '#!/bin/sh\nexit 101\n' > /usr/sbin/policy-rc.d
+  chmod 0755 /usr/sbin/policy-rc.d
+  trap 'rm -f -- /usr/sbin/policy-rc.d' EXIT
   ensure_account
   install_docker
-  /usr/local/sbin/factory-host-check
+  install -d -m 0755 /etc/software-factory
+  {
+    printf 'parent_ami=%s\nsource_revision=%s\n' "$FACTORY_PARENT_AMI" "$FACTORY_SOURCE_REVISION"
+    dpkg-query -W docker-ce docker-ce-cli containerd.io
+    aws --version
+  } > /etc/software-factory/image-info
+  chmod 0644 /etc/software-factory/image-info
+  touch /run/factory-ami-builder
+  echo 'AMI bake complete; inspect provenance and explicitly finalize before capture.'
 }
 
-if [[ ${BASH_SOURCE[0]:-} == "$0" ]]; then prepare_host "$@"; fi
+if [[ ${BASH_SOURCE[0]:-} == "$0" ]]; then bake_host; fi

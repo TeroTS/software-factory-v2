@@ -4,8 +4,8 @@
 # Fail on missing or conflicting prerequisites so operators do not mistake stack
 # creation for a ready host; this does not prove credentials or factory execution.
 set -euo pipefail
-volume='@DATA_VOLUME_ID@'
 trap 'status=$?; if [ "$status" -ne 0 ]; then echo "Host readiness failed at line $LINENO; inspect the check and host state" >&2; fi' EXIT
+volume=$(</etc/software-factory/volume-id)
 export PATH=/usr/sbin:/usr/bin:/sbin:/bin
 test "$(id -u)" = 0
 test "$(uname -s):$(uname -m)" = Linux:aarch64

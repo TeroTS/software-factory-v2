@@ -24,6 +24,10 @@ verify:
 	$(MAKE) lint
 	$(MAKE) coverage
 	npm run cdk -- synth --quiet
-	bash -n infra/ec2/prepare-storage.sh
-	bash -n infra/ec2/prepare-host.sh
-	bash -n infra/ec2/check-host.sh
+	bash -n infra/ec2/scripts/shared/prepare-storage.sh
+	bash -n infra/ec2/scripts/factory/prepare-host.sh
+	bash -n infra/ec2/scripts/factory/check-host.sh
+	bash -n infra/ec2/scripts/factory/start-runner.sh
+	bash -n infra/ec2/scripts/factory/stop-runner.sh
+	bash -n infra/ec2/scripts/builder/bake-host.sh
+	bash -n infra/ec2/scripts/builder/finalize-image.sh

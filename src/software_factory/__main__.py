@@ -1,6 +1,7 @@
 # Expose the contracted terminal entrypoint; report startup failures without sensitive tracebacks.
 import argparse
 import logging
+import os
 import signal
 from pathlib import Path
 from types import FrameType
@@ -29,6 +30,9 @@ def main() -> int:
     try:
         config = load_config(args.config)
         logger = logging.LoggerAdapter(logger, {"repository": config.repository}, merge_extra=True)
+        selected = os.environ.get("AGENT_IMAGE")
+        if selected is not None and config.agent_image != selected:
+            raise FactoryError("TOML agent_image must match the selected AGENT_IMAGE; select/configure while stopped")
         runtime = preflight(config)
         Runner(config, runtime).run()
     except FactoryError as error:

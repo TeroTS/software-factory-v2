@@ -9,7 +9,7 @@ deployment, root/other runner identities, and remote engines are unsupported.
 1. Complete [EC2 host setup](#ec2-host-setup); no host checkout or manual provisioner is needed.
 2. Switch to `factory` with `sudo -iu factory`, [publish/pull images](#ec2-image-publication),
    complete [authentication](#authentication), and prepare the [target](#shared-image-and-target-preparation).
-3. Create the four-field operator TOML shown in [README](../README.md#run-the-factory),
+3. Create the three-field operator TOML shown in [README](../README.md#run-the-factory),
    outside the target checkout/workspace. No credentials or `.env` loading are supported.
 4. **Inspect existing `agent:implement` labels:** already-labeled issues are eligible.
    Start the selected runner container only through an explicit supervisor start;
@@ -22,43 +22,61 @@ for runtime behavior and [recovery](#manual-inspection-and-recovery) for stoppin
 
 ## EC2 host setup
 
-The Python CDK app in `infra/ec2/` generates CloudFormation and embeds the three local shell
-files into first-boot UserData; it never fetches source at boot. The runner remains container-only.
-Run `./scripts/setup` first (Python/uv plus Node 22 LTS/npm on the operator computer).
-Run AWS commands from an authenticated operator machine, not from an agent:
+Run `./scripts/setup` on the operator computer. The bootstrapless CDK app defines persistent
+`software-factory-shared` networking plus separate `software-factory-ami-builder` and `software-factory`
+consumers, each with its own security group/IAM role. Deploy shared networking first and keep it across bakes.
+Always name the intended stack; use `--exclusively` for consumer operations so networking is not updated implicitly.
+Existing deployments need a separately reviewed/authorized network-ownership migration; do not apply this as a routine update.
+The builder embeds reviewed repository files at synthesis, installs signed Docker packages and AWS CLI
+from its approved official ARM64 HTTPS installer (no detached-signature verification), and keeps engines masked.
+Never attach factory storage or enroll credentials on the builder. Host tool versions are recorded, not pinned.
+Every bake must start with the builder stack absent: explicitly destroy the previous builder stack after inventory/approval,
+then deploy it afresh. Do not update/restart a previously baked instance. AMIs/snapshots remain outside the stack.
 
 ```sh
 export AWS_PROFILE=AWSAdministratorAccess-172318459814 AWS_REGION=eu-central-1
-aws sts get-caller-identity  # require account 172318459814
 test "$(aws sts get-caller-identity --query Account --output text)" = 172318459814
+# Set UBUNTU_AMI to an available Canonical (099720109477) Ubuntu 24.04 ARM64 image; verify owner/architecture first.
+aws ec2 describe-images --owners 099720109477 --image-ids "${UBUNTU_AMI:?}" --query 'Images[*].[ImageId,Architecture,State,Name]'
 npm run cdk -- synth --quiet
-aws cloudformation validate-template --template-body file://infra/ec2/cdk.out/software-factory.template.json
-npm run cdk -- diff --parameters UbuntuAmi=ami-07a4d842baa6e2884
-# Inspect the diff before approving the deployment:
-npm run cdk -- deploy --parameters UbuntuAmi=ami-07a4d842baa6e2884
-aws cloudformation describe-stacks --stack-name software-factory --query 'Stacks[0].Outputs'
-aws ssm start-session --target '<InstanceId from stack outputs>'
+npm run cdk -- diff software-factory-shared
+# After reviewing/authorizing persistent networking (initial deployment only):
+npm run cdk -- deploy software-factory-shared
+npm run cdk -- diff --exclusively software-factory-ami-builder --parameters UbuntuAmi="$UBUNTU_AMI" --parameters SourceRevision="$(git rev-parse HEAD)"
+# After reviewing/authorizing builder creation:
+npm run cdk -- deploy --exclusively software-factory-ami-builder --parameters UbuntuAmi="$UBUNTU_AMI" --parameters SourceRevision="$(git rev-parse HEAD)"
+BUILDER=$(aws cloudformation describe-stacks --stack-name software-factory-ami-builder --query "Stacks[0].Outputs[?OutputKey=='BuilderInstanceId'].OutputValue | [0]" --output text)
+aws ssm start-session --target "$BUILDER"
 ```
 
-The AMI pin is Canonical (`099720109477`) Ubuntu 24.04 ARM64; verify it before deployment.
-Do not hand-edit generated templates. This asset-free stack uses CDK's bootstrapless synthesizer:
-no `cdk bootstrap`, bootstrap roles/buckets, or associated storage costs are needed.
-UserData mounts retained storage before installing Docker from signed repositories and AWS CLI v2
-from AWS's official ARM64 HTTPS installer, without detached-signature verification. It then creates/checks
-factory access. AWS CLI uses the EC2 role for ECR; no operator AWS credentials are saved on the host.
-Host tool versions are unpinned; image pins remain independent.
-In Session Manager, run `sudo cloud-init status --wait`, then `sudo /usr/local/sbin/factory-host-check`.
-The latter checks actual storage/identity/socket/native-engine access and AWS CLI availability without
-repairing, authenticating, or starting services.
-Stack completion alone is not readiness: inspect `sudo journalctl -u cloud-final` on failure;
-never bypass disk/signature checks or repository trust. Then follow [manual authentication](#authentication).
-UserData runs on first boot, not automatically after template updates; use a replacement test instance
-for preparation changes. The data volume retains factory home, Docker/containerd data,
-and settings/artifacts; root is disposable. Docker services require these mounts.
-For teardown, inspect `aws cloudformation list-stack-resources --stack-name software-factory`,
-then explicitly approve `npm run cdk -- destroy`. Data volumes and both ECR repositories are retained;
-inventory them before teardown and delete only individually confirmed disposable resources, if authorized.
-Retained volumes/images incur charges after deletion; no backups or cross-AZ restore are provided.
+In SSM, run `sudo cloud-init status --wait`; inspect `sudo cat /etc/software-factory/image-info`,
+`sudo journalctl -u cloud-final` and masked Docker/containerd state. Source revision records the base commit,
+not an assertion of a clean checkout. On success, explicitly run
+`sudo systemd-run --unit factory-finalize-image --on-active=5s /usr/local/sbin/factory-finalize-image`.
+It rejects private/mounted factory data, clears cloud-init/machine/SSM/SSH identity and powers off.
+Failure to stop is not capture success; inspect/rebuild rather than bypass finalization checks.
+
+```sh
+aws ec2 wait instance-stopped --instance-ids "$BUILDER"
+AMI=$(aws ec2 create-image --instance-id "$BUILDER" --name "software-factory-base-${VERSION:?}" --query ImageId --output text)
+aws ec2 wait image-available --image-ids "$AMI"
+aws ec2 describe-images --owners 172318459814 --image-ids "$AMI" --query 'Images[*].[ImageId,Architecture,State,BlockDeviceMappings]'
+```
+
+Record the AMI ID, parent, source/installed versions and backing snapshot. Before selection, launch a disposable
+AMI test host with scratch storage and volume-specific UserData: verify fresh identity/capture-ready file,
+SSM, retained mounts/sentinel/modes, factory Docker access, reboot and missing-storage failure, and stopped execution.
+Then inventory and explicitly destroy only `software-factory-ami-builder`; its AMI/snapshot survive destruction.
+Keep `software-factory-shared` and the factory stack; never use `destroy --all`. Remove separately created test hosts first.
+Build/test failures never change the selected factory AMI. AMIs/snapshots require separately approved deletion.
+
+Select the tested, available, account-owned ARM64 AMI through `--parameters FactoryAmi="$AMI"` on explicit
+`npm run cdk -- diff --exclusively software-factory`, then reviewed `deploy --exclusively software-factory`. Replacement needs approval:
+stop/inspect the old host and cleanly detach only its exact retained volume before applying the change.
+In the new host's SSM shell run `sudo cloud-init status --wait` and `sudo /usr/local/sbin/factory-host-check`;
+this read-only check, not stack completion, establishes readiness. UserData mounts storage before Docker,
+without installs/source fetches. Rebuild/test the AMI for baked helper/package updates; container releases stay independent.
+Factory teardown must name its stack explicitly; retained EBS/ECR and AMI snapshots incur charges until approved deletion.
 
 ## EC2 image publication
 
@@ -151,6 +169,41 @@ or operator TOML. Before a later explicit start, set TOML `agent_image` to the r
   mv -f -- "$work/deployment.env" "$state/deployment.env"
 )
 ```
+
+## Explicit start
+
+After [selection](#stopped-host-selection) and [manual authentication](#authentication), place the
+three-field TOML at `/home/factory/.config/software-factory/factory.toml` (factory-owned, mode 0600).
+Its `agent_image` must exactly match selected `AGENT_IMAGE`; the runner validates this before preflight.
+Artifacts use fixed retained `/home/factory/artifacts`. Remove legacy `artifacts_dir` explicitly and rebuild/select
+the updated runner image; previous diagnostics are not moved/deleted. The launcher binds this same-path directory,
+read-only configuration/App state, writable Pi
+state, and the local socket with its supplementary GID. It never pulls images or changes selection.
+
+**Before authorizing start**, inspect all eligible `agent:implement` issues and any uncertain
+publication/leftover resources using [manual recovery](#manual-inspection-and-recovery).
+From the administrative Session Manager shell (not the unprivileged factory shell):
+
+```sh
+sudo systemctl start software-factory.service  # explicit authorization to poll/execute eligible issues
+sudo systemctl status software-factory.service --no-pager
+sudo journalctl -u software-factory.service --no-pager -n 20
+```
+
+The journal names a fresh private `/home/factory/.local/state/software-factory/start-*/runner.log`.
+Read that file as factory: JSON event `runner_polling` proves existing startup validation passed
+and releases systemd's `activating` state. Startup has a five-minute supervisor limit;
+`runner_failed` or a nonzero service exit requires inspection. **Liveness alone does not prove
+live inference/refresh, cleanup or publication.** No health probe runs issues.
+Logs append within that start directory and survive container removal/replacement; prior logs remain.
+The unit is deliberately static (`systemctl enable` is unsupported), has `Restart=no`, and is not
+started by preparation, image selection, reboot or crash recovery. A stopped/failed container name
+conflict requires inspection, not implicit removal. The service's Docker stop allows 120 seconds
+(including the existing 60-second cleanup budget), with a 150-second supervisor limit.
+
+The AMI contains the unit/launcher without starting them. Baked helper/unit changes require a rebuilt,
+tested AMI and explicit stopped-host replacement, not runtime source copying or rerunning the installer.
+Preserve retained state and independently selected container images throughout replacement.
 
 ## Authentication
 
@@ -282,12 +335,12 @@ manual cleanup; allow its separate **60-second cleanup budget** plus failure rep
 
 ```sh
 grep -F '"event": "run_started"' /absolute/path/to/factory.jsonl
-find /absolute/path/to/artifacts_dir -maxdepth 1 -type d -name 'issue-42-*' -print
+find /home/factory/artifacts -maxdepth 1 -type d -name 'issue-42-*' -print
 less /absolute/path/to/selected-run/run.log
 ```
 
 The `run_started` record names the issue, `run_id`, and private directory. Use the
-configured artifacts path; keep diagnostics private and never execute retained
+fixed `/home/factory/artifacts` path; keep diagnostics private and never execute retained
 workspace scripts on the host. A crash may leave containers running.
 
 ### 2. Identify leftovers

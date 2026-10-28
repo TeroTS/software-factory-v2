@@ -67,9 +67,7 @@ def test_sigterm_becomes_cleanup_capable_interruption() -> None:
 
 def test_cli_default_logs_info_and_interruption_as_json_stderr(tmp_path: Path) -> None:
     config = tmp_path / "factory.toml"
-    config.write_text(
-        'repository = "owner/repo"\nmodel = "chosen"\nagent_image = "agent:local"\nartifacts_dir = "runs"\n'
-    )
+    config.write_text('repository = "owner/repo"\nmodel = "chosen"\nagent_image = "agent:local"\n')
     result = subprocess.run(
         [
             sys.executable,
@@ -114,3 +112,25 @@ def test_cli_startup_failure_is_json_without_raw_input(tmp_path: Path) -> None:
     assert "Cannot read configuration" in record["message"]
     assert "repository" not in record and "issue" not in record
     assert "private-invalid-input" not in result.stderr
+
+
+@pytest.mark.parametrize("selected", ["agent:local", "other-agent:local"])
+def test_cli_validates_selected_agent_before_preflight(tmp_path: Path, monkeypatch, caplog, selected: str) -> None:
+    from software_factory.__main__ import main
+
+    config = tmp_path / "factory.toml"
+    config.write_text('repository="owner/repo"\nmodel="chosen"\nagent_image="agent:local"\n')
+    monkeypatch.setattr("sys.argv", ["software_factory", "--config", str(config)])
+    monkeypatch.setenv("AGENT_IMAGE", selected)
+    startup = Mock(return_value=Mock())
+    runner = Mock()
+    monkeypatch.setattr("software_factory.__main__.preflight", startup)
+    monkeypatch.setattr("software_factory.__main__.Runner", Mock(return_value=runner))
+    assert main() == (0 if selected == "agent:local" else 1)
+    if selected == "agent:local":
+        startup.assert_called_once()
+        runner.run.assert_called_once()
+    else:
+        startup.assert_not_called()
+        runner.run.assert_not_called()
+        assert "agent_image must match the selected AGENT_IMAGE" in caplog.text

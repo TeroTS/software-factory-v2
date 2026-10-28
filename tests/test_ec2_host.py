@@ -9,7 +9,10 @@ from test_ec2 import ROOT, SCRIPTS, bootstrap_script
 
 
 def functions() -> str:
-    return "\n".join((SCRIPTS / name).read_text() for name in ("prepare-storage.sh", "prepare-host.sh"))
+    return "\n".join(
+        (SCRIPTS / name).read_text()
+        for name in ("shared/prepare-storage.sh", "builder/bake-host.sh", "factory/prepare-host.sh")
+    )
 
 
 def run_shell(code: str, tmp_path: Path, **env: str) -> subprocess.CompletedProcess:
@@ -22,7 +25,7 @@ def run_shell(code: str, tmp_path: Path, **env: str) -> subprocess.CompletedProc
     )
 
 
-def test_userdata_orders_storage_account_packages_and_readiness(tmp_path: Path) -> None:
+def test_boot_uses_baked_tools_and_orders_storage_before_docker(tmp_path: Path) -> None:
     script = bootstrap_script()
     assert len(script.encode()) < 16384
     assert "git clone" not in script
@@ -37,13 +40,15 @@ def test_userdata_orders_storage_account_packages_and_readiness(tmp_path: Path) 
         "tests/test_lima.py",
     ):
         assert not (ROOT / retired).exists(), f"Retire the old provisioning path: {retired}"
-    code = (SCRIPTS / "prepare-host.sh").read_text()
+    code = (SCRIPTS / "factory/prepare-host.sh").read_text()
+    assert "apt-get" not in code and "curl" not in code
+    code = code.replace("volume=$(</etc/software-factory/volume-id)", "volume=vol-test")
     boundaries = """
 validate_host() { echo host; }
+validate_identity() { echo identity; }
+systemd-analyze() { echo verify; }
 systemctl() { echo "systemctl $*"; }
 prepare_storage() { echo storage; }
-ensure_account() { echo account; }
-install_docker() { echo packages; }
 """
     code = code.replace("/usr/local/sbin/factory-prepare-storage", "prepare_storage")
     code = code.replace("/usr/local/sbin/factory-host-check", "echo readiness")
@@ -51,27 +56,34 @@ install_docker() { echo packages; }
     assert result.returncode == 0, result.stderr
     assert result.stdout.splitlines() == [
         "host",
-        "systemctl start snap.amazon-ssm-agent.amazon-ssm-agent.service",
+        "identity",
         "storage",
-        "account",
-        "packages",
+        "systemctl unmask docker.service docker.socket containerd.service",
+        "verify",
+        "systemctl enable --now docker",
         "readiness",
     ]
 
 
-@pytest.mark.parametrize("phase", ["validate_host", "prepare_storage", "ensure_account", "install_docker"])
+@pytest.mark.parametrize(
+    "phase", ["validate_host", "prepare_storage", "validate_identity", "systemctl", "systemd-analyze"]
+)
 def test_preparation_failure_never_reports_readiness(tmp_path: Path, phase: str) -> None:
-    code = (SCRIPTS / "prepare-host.sh").read_text()
+    code = (SCRIPTS / "factory/prepare-host.sh").read_text()
+    code = code.replace("volume=$(</etc/software-factory/volume-id)", "volume=vol-test")
     code = code.replace("/usr/local/sbin/factory-prepare-storage", "prepare_storage")
     code = code.replace("/usr/local/sbin/factory-host-check", "echo unexpected")
     boundaries = "\n".join(
-        f"{name}() {{ {'return 1' if name == phase else ':'}; }}"
-        for name in ("validate_host", "systemctl", "prepare_storage", "ensure_account", "install_docker")
+        f'{name}() {{ echo "{name} $*"; {"return 1" if name == phase else ":"}; }}'
+        for name in ("validate_host", "systemctl", "prepare_storage", "validate_identity", "systemd-analyze")
     )
     result = run_shell(code + boundaries + "\nprepare_host vol-test", tmp_path)
     assert result.returncode != 0
     assert "unexpected" not in result.stdout
     assert "ready" not in result.stdout.lower()
+    assert "systemctl enable --now docker" not in result.stdout
+    if phase in {"validate_host", "prepare_storage", "validate_identity"}:
+        assert "systemctl unmask" not in result.stdout
 
 
 @pytest.mark.parametrize("conflict", ["user-name", "user-id", "user-group", "group-name", "group-id", "home"])
@@ -186,7 +198,7 @@ systemctl() { echo "systemctl $*" >> "$TEST_ROOT/events"; }
     assert "--allow-unauthenticated" not in events
     assert "--no-remove" in events or failure == "update"
     assert "--no-install-recommends" in events or failure == "update"
-    assert ("systemctl enable --now docker" in events) is (not failure)
+    assert "systemctl enable --now docker" not in events
     if not failure:
         assert "usermod --append --groups docker factory" in events
         assert "docker-ce docker-ce-cli containerd.io" in events
@@ -198,7 +210,7 @@ systemctl() { echo "systemctl $*" >> "$TEST_ROOT/events"; }
         assert "aws-install --install-dir /usr/local/aws-cli --bin-dir /usr/bin umask=0022" in events
         assert ".sig" not in events
         assert "gpg --verify" not in code
-        assert events.index("aws-install") < events.index("systemctl enable --now docker")
+        assert "systemctl start" not in events
         ubuntu = (tmp_path / "ubuntu-sources").read_text().splitlines()
         assert len(ubuntu) == 3
         for suite, source in zip(("noble", "noble-updates", "noble-security"), ubuntu, strict=True):
@@ -261,7 +273,11 @@ docker() {
 
 def installed_checker(tmp_path: Path) -> Path:
     destination = tmp_path / "factory-host-check"
-    destination.write_text((SCRIPTS / "check-host.sh").read_text().replace("@DATA_VOLUME_ID@", "vol-test"))
+    volume = tmp_path / "volume-id"
+    volume.write_text("vol-test\n")
+    destination.write_text(
+        (SCRIPTS / "factory/check-host.sh").read_text().replace("/etc/software-factory/volume-id", str(volume))
+    )
     destination.chmod(0o755)
     return destination
 
@@ -271,11 +287,20 @@ def test_readiness_checker_is_standalone_read_only_and_installed_executable(tmp_
     assert checker.stat().st_mode & 0o777 == 0o755
     check = checker.read_text()
     subprocess.run(["bash", "-n", str(checker)], check=True, capture_output=True, timeout=10)
-    assert "volume='vol-test'" in check
+    assert "volume=$(<" in check
     assert "runuser -u factory -- env -i" in check
     assert "unix:///var/run/docker.sock" in check
     for forbidden in ("apt-get", "mkfs", "usermod", "chown", "chmod", "systemctl start", "touch"):
         assert forbidden not in check
+
+
+def test_readiness_missing_volume_setting_is_an_observable_failure(tmp_path: Path) -> None:
+    checker = installed_checker(tmp_path)
+    (tmp_path / "volume-id").unlink()
+    result = subprocess.run(["bash", str(checker)], capture_output=True, text=True, timeout=10)
+    assert result.returncode != 0
+    assert "Host readiness failed at line" in result.stderr
+    assert "Factory host ready" not in result.stdout
 
 
 @pytest.mark.parametrize(
@@ -476,4 +501,7 @@ systemctl() { echo "systemctl $*"; }
         assert len((tmp_path / "mounted").read_text().splitlines()) == 4
         for service in ("docker", "containerd"):
             dropin = (tmp_path / "systemd" / f"{service}.service.d/factory-storage.conf").read_text()
-            assert dropin == f"[Unit]\nRequiresMountsFor={tmp_path}/data {tmp_path}/docker {tmp_path}/containerd\n"
+            assert f"RequiresMountsFor={tmp_path}/data {tmp_path}/docker {tmp_path}/containerd" in dropin
+            assert f"ExecStartPre=/usr/bin/mountpoint -q {tmp_path}/data" in dropin
+            assert f"ExecStartPre=/usr/bin/mountpoint -q {tmp_path}/docker" in dropin
+            assert f"ExecStartPre=/usr/bin/mountpoint -q {tmp_path}/containerd" in dropin

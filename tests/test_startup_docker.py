@@ -415,10 +415,11 @@ def test_operator_starts_runner_container_and_observes_idle_polling(tmp_path: Pa
     )
     pi.chmod(0o755)
     config = tmp_path / "factory.toml"
-    config.write_text(f'repository = "owner/repo"\nmodel = "chosen"\nagent_image = "{IMAGE}"\nartifacts_dir = "runs"\n')
-    previous = tmp_path / "runs" / "issue-17-failed"
+    config.write_text(f'repository = "owner/repo"\nmodel = "chosen"\nagent_image = "{IMAGE}"\n')
+    previous = Path("/home/factory/artifacts") / f"issue-17-failed-{tmp_path.name}"
     previous.mkdir(parents=True)
     (previous / "run.log").write_text("previous diagnostic\n")
+    baseline = set(previous.parent.iterdir())
     image_id = subprocess.check_output(["docker", "image", "inspect", IMAGE, "--format", "{{.Id}}"], text=True).strip()
     output = tmp_path / "stderr"
     with output.open("w") as stderr, runner_container(config, stderr) as (process, _):
@@ -436,7 +437,7 @@ def test_operator_starts_runner_container_and_observes_idle_polling(tmp_path: Pa
     assert process.returncode == 130
     assert "Polling owner/repo every 30 seconds" in output.read_text()
     assert "Traceback" not in output.read_text()
-    assert list(previous.parent.iterdir()) == [previous]
+    assert set(previous.parent.iterdir()) == baseline
     assert (previous / "run.log").read_text() == "previous diagnostic\n"
     calls = [json.loads(line) for line in marker.read_text().splitlines()]
     assert all("--method" not in call or call[call.index("--method") + 1] == "GET" for call in calls)
