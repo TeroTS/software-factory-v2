@@ -1,13 +1,12 @@
 # Autonomous Coding Factory
 
-Turns GitHub issues labeled `agent:implement` into verified draft PRs using a local
-Python runner, a shared Linux agent image, and Pi/Copilot. Human review and target
-CI remain required; the factory never merges.
+Turns GitHub issues labeled `agent:implement` into verified draft PRs using a Python
+runner and Pi/Copilot in a shared Linux agent image. GitHub holds coordination state;
+there is no database or HTTP API. Human review and target CI remain required; the factory never merges.
 
 ## Development
 
-Requires Python **3.14.3**, **uv 0.5.13**, Node **22 LTS**/npm, Make, a POSIX shell, and Git.
-Node/CDK are operator/development tools only; setup locks the local CDK CLI with `npm ci`.
+Requires Python **3.14.3**, **uv 0.5.13**, Node **22 LTS**/npm, Make, a POSIX shell and Git.
 From the repository root:
 
 ```sh
@@ -16,35 +15,19 @@ uv run --frozen python -m software_factory --help
 ./scripts/verify
 ```
 
-Ordinary verification needs no Docker or credentials. It checks Ruff formatting,
-lint, tests with an **80%** line/branch coverage gate (including the Pi bridge and Python CDK),
-CDK synthesis, and host-script syntax.
-
-| Command | Purpose |
-| --- | --- |
-| `make format` | Apply formatting. |
-| `make format-check` | Check formatting without changes. |
-| `make lint` | Check lint rules. |
-| `make test` | Run tests without the coverage gate. |
-| `make coverage` | Run tests with coverage. |
+Setup installs locked dependencies. Verification needs no Docker or credentials and runs
+Ruff format/lint, tests with an **80%** line/branch coverage gate, CDK synthesis and shell syntax checks.
+Use `make format` to format, `make test` for tests alone, or `make coverage` for the coverage gate.
+[Docker/CLI tests](docs/operations.md#docker-and-cli-tests) require the prepared ARM64 test host;
+live GitHub/Copilot checks require explicit approval.
 
 ## Run the factory
 
-Deploy the runner **only as a container on AWS EC2**, using **Ubuntu 24.04 LTS ARM64**,
-**factory 2000:2000**, and local native Docker. A separate disposable CDK builder bakes
-host prerequisites/service files into a private AMI, using a fresh builder instance for each bake.
-A persistent shared-network stack supplies the VPC/subnet/internet gateway to both builder and factory;
-only the builder stack is recreated between bakes. Operational UserData mounts retained
-storage before starting Docker; it never installs packages, authenticates or starts factory execution.
-Runner Git/`gh`/Python/Node/Pi and Compose belong in images. Private GitHub App and
-Pi/Copilot state persists outside containers. Remote Docker engines are unsupported.
-Follow [EC2 host setup](docs/operations.md#ec2-host-setup), then
-[manual authentication](docs/operations.md#authentication). No host checkout or separate
-provisioner is needed. Build/publish images on the operator computer; see
-[image publication](docs/operations.md#ec2-image-publication).
+Deployment is **container-only on AWS EC2**, Ubuntu 24.04 ARM64, factory **2000:2000**,
+with local native Docker. Runner and agent images are independently versioned.
+Follow the [operator guide](docs/operations.md) for host setup, image selection and manual authentication.
 
-Keep operator TOML outside the target checkout/workspace at
-`/home/factory/.config/software-factory/factory.toml`:
+Keep `/home/factory/.config/software-factory/factory.toml` outside the target checkout:
 
 ```toml
 repository = "TeroTS/factory-smoke-test"
@@ -52,56 +35,20 @@ model = "gpt-6.1-sol"
 agent_image = "software-factory-agent:1.0.0"
 ```
 
-Exactly these three fields are required. Artifacts use fixed retained `/home/factory/artifacts`,
-mounted at the same path inside the runner. Remove the old `artifacts_dir` field explicitly;
-prior diagnostics stay where they were. Rebuild/select the changed runner image before using
-this configuration. Use an accessible Copilot model ID; never put credentials in this file.
+Exactly these three fields are required; `agent_image` must match the selected agent reference.
+Use an accessible Copilot model ID, never credentials. Artifacts are fixed at `/home/factory/artifacts`;
+remove legacy `artifacts_dir`/Compose fields explicitly without moving prior diagnostics.
+Targets must supply executable, noninteractive `./scripts/setup` and `./scripts/verify` matching target CI.
 
-The target repository must already provide executable, noninteractive
-`./scripts/setup` and `./scripts/verify`; verification must match target CI.
-See [target preparation](docs/operations.md#shared-image-and-target-preparation)
-for permissions and Docker resource conventions.
-
-**Inspect existing trigger labels before starting:** already-labeled issues are eligible.
-Run only one runner per repository.
-
-Run the selected runner image through its explicit systemd start, with configuration,
-private state, same-path artifacts, and the local Docker socket mounted as described in
-the [explicit start procedure](docs/operations.md#explicit-start). Do not invoke host Python
-to deploy the runner.
-
-Application logs are JSON Lines on **stderr**, with **INFO** progress enabled by
-default; logging leaves stdout unused. Each record has UTC `timestamp`, `level`,
-`event`, and `message`, plus `repository`, `issue`, `phase`, `run_id`, and `pr_url`
-when available. Command output remains in private run logs. See
-[diagnostics](docs/operations.md#diagnostics-and-safety) for collection and limits.
-
-- Ctrl-C/SIGTERM stops the runner and attempts bounded cleanup.
-- Failed runs retain private diagnostics; no automatic repair, requeue, or resume.
-- Rebuild the image and restart the runner after image, instruction, or skill changes.
-- GitHub uses the configured App installation, not personal `gh` login. Host credentials
-  survive runner stop/start; short-lived tokens renew automatically. Workflow-file
-  changes are blocked in this version.
-- **Docker access is not isolation:** the agent can effectively control the engine/host.
-
-## Docker verification
-
-On an Ubuntu ARM64 test host as `factory`, with the development dependencies installed
-separately and the shared image already built:
-
-```sh
-docker build --platform linux/arm64 -f runner/Dockerfile -t software-factory-runner:test .
-FACTORY_DOCKER_TESTS=1 FACTORY_AGENT_IMAGE_TESTS=1 FACTORY_RUNNER_IMAGE_TESTS=1 ./scripts/verify
-```
-
-GitHub/Pi boundaries are scripted. Live authenticated checks require explicit approval;
-see [extended verification](docs/operations.md#verification-beyond-unit-tests).
+**Inspect eligible issues before [starting](docs/operations.md#explicit-start):** already-labeled issues
+can execute immediately. Run one runner per repository; no automatic restart, requeue or recovery.
+Inspect [health](docs/operations.md#operational-health) and retained diagnostics before intervening.
+**Docker access grants effective engine/host control, not isolation.**
 
 ## Reference
 
-- [Operator guide](docs/operations.md): provisioning, target setup, cleanup, diagnostics, extended tests.
-- [Shared image](agent/README.md): build and test commands.
-- [Image reference](docs/agent-image.md): pinned tools, instructions, skills, provenance, migration.
-- [Agent rules](AGENTS.md) · [Domain vocabulary](CONTEXT.md) · [CI](.github/workflows/verify.yml)
+- [Operator guide](docs/operations.md): deployment, authentication, health and recovery.
+- [Image reference](docs/agent-image.md): tool pins, build/test commands, instructions and skills.
+- [Specification](SPEC.md) · [Vocabulary](CONTEXT.md) · [Agent rules](AGENTS.md) · [CI](.github/workflows/verify.yml).
 
-Keep these instructions current when setup, configuration, or runtime requirements change.
+Update guidance when setup, configuration or runtime requirements change.

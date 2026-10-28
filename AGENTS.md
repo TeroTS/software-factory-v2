@@ -2,177 +2,87 @@
 
 ## Start of work
 
-- Read [README.md](README.md) for commands; consult [operator guidance](docs/operations.md)
-  and the [image reference](docs/agent-image.md) when changing those areas.
-- Read [SPEC.md](SPEC.md) for affected behavior/interfaces, and
-  [CONTEXT.md](CONTEXT.md) before naming domain concepts.
-- For execution-model changes, read [DECISIONS.md](DECISIONS.md) and
-  [docs/slices/current-slice.md](docs/slices/current-slice.md). Keep one execution
-  backend. Docker engine access grants effective engine/host control, not isolation.
-- Keep story scope/status, implementation notes, verification evidence, and next
-  steps only in `docs/slices/current-slice.md`. README is operator/developer guidance;
-  AGENTS contains standing agent rules; architecture docs describe boundaries;
-  workflow docs contain procedures. Update those only when their durable content
-  changes, not to mirror slice progress.
-- Inspect affected callers, tests, configuration, and working-tree changes. Keep
-  changes minimal and preserve unrelated work. Follow the Domain Vocabulary,
-  Safety and Contract Invariants, and Commenting Convention sections below.
+- Read [README](README.md) for commands, [SPEC](SPEC.md) for affected behavior and
+  [CONTEXT](CONTEXT.md) before naming domain concepts. Preserve established public interfaces.
+- Read [DECISIONS](DECISIONS.md) and [current slice](docs/slices/current-slice.md) for
+  execution/deployment changes; consult [operations](docs/operations.md) and the
+  [image reference](docs/agent-image.md) when changing those areas.
+- Inspect working-tree changes, affected callers, tests and configuration; preserve unrelated work.
+- Keep story scope/status, implementation notes, evidence and next steps **only** in
+  `docs/slices/current-slice.md`. Other docs contain durable guidance, not progress reports.
+- Keep docs short: link to the authoritative file instead of repeating its rules or procedures.
 
-## Architecture and paths
+## Code map
 
-Local autonomous coding factory: the Python standard-library runner validates
-shared-image startup, polls GitHub, and executes issue runs.
-GitHub holds durable coordination; no database or HTTP API exists. The same runner
-runs only in a runner container on a CloudFormation-prepared Ubuntu ARM64 EC2 host.
+The standard-library Python runner polls GitHub and executes serial issue runs; GitHub
+holds durable coordination. No database or HTTP API exists. One container execution backend only.
 
-- `src/software_factory/__main__.py`, `config.py`: terminal CLI, signals, three-field TOML.
-- `runner.py`: native image/engine preflight, serial issue coordination, cleanup/publication gates.
-- `agent/`: factory-maintained pinned shared-image build definition and instructions.
-- `auth.py`: private host GitHub App credentials and scoped token renewal.
-- `github.py`, `repository.py`: App-authenticated host GitHub CLI and trusted Git publication.
-- `process.py`: command deadlines, safe errors, private/redacted diagnostics.
-- `sandbox.py`, `sandbox_agent.py`: shared-image agent lifecycle, scoped cleanup, credentials/Pi/verification.
-- `tests/`: pytest unit, real local Git/process/Docker, scripted external-boundary CLI E2E;
-  `tests/test_agent_wrapper.py` exercises the standalone Python bridge and measures its coverage.
-- `scripts/`, `Makefile`, `.github/workflows/verify.yml`: development entrypoints and CI.
-- `infra/ec2/`: persistent shared-network Python CDK stack plus separate AMI-builder/operational stacks; baked host scripts
-  live under `infra/ec2/scripts/` and the systemd unit stays in `infra/ec2/`;
-  installation belongs to baking; retained storage must be ready before Docker starts. No separate host provisioner
-  or hand-maintained CloudFormation template. Node/CDK are development/operator tools only.
+- `src/software_factory/`: CLI/config, runner preflight/coordination, App auth, GitHub/Git
+  publication, process deadlines/diagnostics and sandbox/agent lifecycle.
+- `agent/`: pinned shared image, instructions and skills; runner owns the Pi bridge.
+- `infra/ec2/`: Python CDK networking, AMI-builder and operational stacks, baked host
+  scripts and systemd service. Node/CDK are operator/development tools, not host runner tools.
+- `tests/`: pytest unit, real Git/process/Docker and scripted-boundary CLI E2E tests.
+- `scripts/`, `Makefile`, `.github/workflows/verify.yml`: development and CI entrypoints.
 
-## Development workflow
+## Development
 
-- Follow [README development commands](README.md#development); run `./scripts/verify`
-  in order: Ruff format check → lint → tests/coverage. `make format` mutates files.
-- Use locked development dependencies and pinned image toolchains/backend; host
-  EC2 UserData uses unpinned packages from signed repositories, except AWS CLI v2's
-  approved official ARM64 HTTPS installer without detached-signature verification. Host verification needs no Node.js.
-- Maintain the **80%** overall line/branch coverage gate, including the Pi bridge.
-  Never lower thresholds or exclude business logic.
-- Add meaningful tests for behavior changes and relevant failures. Use existing pytest
-  patterns; retain real Git/process and Docker boundary checks where applicable.
-- Unit checks may run on a development host. Docker/CLI checks require the provisioned
-  Ubuntu 24.04 ARM64 test host, factory 2000:2000, and an explicitly built shared image.
-  CI verifies as the same identity without host sudo.
-- Distinguish scripted boundaries from real services. Live authenticated checks
-  (including Copilot probes) require explicit approval; AWS preparation follows the approved deployment scope. See [extended verification](docs/operations.md#verification-beyond-unit-tests).
+- Use locked dependencies and pinned image toolchains. Run `./scripts/verify`:
+  Ruff format check → lint → tests/coverage → CDK synthesis → shell syntax. `make format` mutates files.
+- Keep the **80%** overall line/branch coverage gate, including the Pi bridge and CDK;
+  never lower thresholds or exclude business logic. Test behavior changes and relevant failures.
+- Retain real Git/process/Docker boundary tests. Docker/CLI checks require Ubuntu 24.04
+  ARM64, factory 2000:2000 and explicitly built images; CI uses that identity without host sudo.
+- Scripted boundaries are not live service acceptance. Live authenticated GitHub/Copilot
+  checks require explicit approval; AWS work follows the accepted deployment scope.
+- Reuse `FactoryError`, `Commands` and existing boundary patterns; give functions explicit
+  return annotations and safe, actionable errors. Do not edit generated reports or commit private artifacts.
 
-## Configuration and local requirements
+## Runtime and deployment invariants
 
-- Runtime invocation inside the selected runner container: `python -m software_factory --config /absolute/path/to/factory.toml`.
-  Inspect trigger labels before starting/upgrading: already-labeled issues are
-  eligible for execution. Verification failures end the run without automatic repair.
-- Operator TOML requires exactly `repository`, `model`, `agent_image`; no credentials/defaults.
-  Artifacts are fixed at `/home/factory/artifacts`, bound at the same path. Reject removed
-  `artifacts_dir` and legacy Compose fields with migration guidance; never automatically migrate.
-  Model IDs exactly match an accessible `github-copilot` model; startup preserves selected-agent matching.
-- Runner execution requires the provisioned Ubuntu 24.04 LTS ARM64 Linux host
-  and effective factory UID/GID 2000:2000. Deployment is container-only on AWS EC2:
-  validate actual Docker/account host preparation separately;
-  retain same-path workspace binds, local engine/socket supplementary GID,
-  read-only App credentials, writable Pi refresh state, and private retained logs. Reject root/other IDs and unsupported
-  hosts before claims; never switch accounts or elevate the host runner.
-  Git, `gh`, OpenSSL, curl, Python/Node, Pi (tested **1.3.0**), and Compose belong
-  inside images; private GitHub App credentials and Pi state persist outside them.
-  Host preparation includes AWS CLI from its approved upstream installer and signed Ubuntu prerequisites for
-  EC2-role ECR authentication, not runner execution; never save operator AWS credentials.
-  Host provisioning must not install runner toolchains, modify login profiles, or
-  remove existing tools/data. Keep shared networking across bakes; destroy/recreate only the builder stack
-  for a fresh instance/root disk each time. Consumer stacks own separate security groups/IAM roles.
-  A disposable builder bakes host prerequisites/helpers/service files;
-  operator AWS CLI captures the private AMI outside CloudFormation lifecycle. Builder-stack destruction
-  must preserve the AMI/backing snapshot. Operational UserData supplies only boot inputs;
-  storage-first startup and read-only readiness remain fail-closed. Never bake private/deployment
-  state; rebuilding a helper requires a tested AMI and explicit stopped-host replacement.
-  No Lima/local-host deployment or separate Python host provisioner. Initial authentication/
-  access approval is manual. Repository API and HTTPS Git use the same App identity,
-  never saved personal login or inherited-token fallback. Preserve private host-file
-  modes and scoped token renewal; credentials never belong in operator TOML.
-- The operator builds the shared `agent/Dockerfile` image before startup, or
-  explicitly publishes/pulls it through ECR deployment while stopped. Runner
-  and agent images are independently versioned; runner owns the bridge, agent
-  owns instructions/skills. No runtime builds/pulls, automatic updates, implicit
-  starts, compatibility negotiation, or V1 rollback/retention guarantees. Require
-  a local native linux/arm64 engine/image and retain the resolved immutable image
-  ID for the session. Bake factory 2000:2000, writable home/caches/npm prefix,
-  and account-scoped sudo with root HOME into the image. Startup validates the
-  actual default identity without root account setup or account-file mutation;
-  incompatible images require explicit rebuild/restart, not compatibility repair.
-  Factory-owned containers request `--platform linux/arm64`
-  and `--pull=never`; target commands inherit `DOCKER_DEFAULT_PLATFORM=linux/arm64`
-  and use the image's unmodified Docker executable. Target scripts must use native
-  images/tools; explicit platform overrides are not intercepted and may invoke
-  engine-supported emulation. No remote engine, automatic shared-image build/pull,
-  or factory-selected emulation fallback.
-- Keep operator TOML outside the target checkout and future run workspace, e.g.
-  `/home/factory/.config/software-factory/factory.toml`. Artifacts use fixed retained
-  `/home/factory/artifacts`; never move/delete previous diagnostics implicitly. Use fresh
-  private run directories and host-usable files. Targets supply ordinary services, not
-  target-specific factory agent images or Compose profiles.
-- Use standard-library runner logging: INFO by default as JSON Lines to stderr,
-  no application log files. Serialize only selected context and safe messages.
-  `logging.ini` provides optional equivalent development defaults. Never log
-  secrets or full transcripts; command diagnostics belong only in private run logs.
-- Keep credentials/private artifacts out of version control; `artifacts/`, `.venv`,
-  coverage reports, and caches are ignored. Do not hand-edit generated reports.
+- Container-only AWS EC2, Ubuntu 24.04 ARM64, factory **2000:2000**, local native Docker.
+  Fail closed before claims on unsupported hosts, identities, engines or images; never elevate the runner.
+- TOML has exactly `repository`, `model`, `agent_image`; no credentials/defaults or automatic migration.
+  Preserve exact Copilot model IDs and selected-agent matching. Artifacts stay at `/home/factory/artifacts`.
+- Preserve same-path workspace binds, socket supplementary GID, read-only App state,
+  writable Pi refresh state and private retained logs. API and HTTPS Git use the same scoped
+  App identity with renewal, never personal login or inherited-token fallback.
+- Runner/agent versions are independent. Build/publish explicitly; pull/select while stopped,
+  then start explicitly. No runtime pulls/builds, automatic updates/restarts, compatibility repair or rollback guarantee.
+  Pin resolved image IDs; factory containers use `--platform linux/arm64 --pull=never`.
+- Bake host helpers/tooling into a tested AMI; UserData only supplies boot inputs and mounts
+  retained storage before Docker. Keep shared networking across fresh builder bakes; preserve
+  AMIs/snapshots and retained data. Never bake private/deployment state or install runner tools on the host.
+  Helper updates require explicit stopped-host replacement, not runtime copying. See deployment decisions.
+- Run setup → Pi → verification inside the agent as factory with writable home/caches;
+  explicit `sudo -n` is for system installs only. No root fallback, runtime account initialization
+  or workspace chown/chmod repair. Targets inherit native-platform defaults and the unmodified Docker CLI;
+  explicit overrides are not intercepted. No remote engine or factory-selected emulation fallback.
+- **Docker access grants effective engine/host control, not isolation.** Keep normal mounts
+  minimal, Copilot credentials on stdin only and host Git metadata trusted; never claim App scopes prevent merging/deployment.
+- Log INFO JSON Lines to stderr using standard-library logging and selected safe context;
+  no secrets/transcripts or application log files. Command output belongs in private diagnostics.
 
-## Domain Vocabulary
+## Issue-run and publication invariants
 
-- Read [CONTEXT.md](CONTEXT.md) before naming domain concepts.
-- Use its canonical terms consistently in code, tests,
-  documentation, and user-facing output. Resolve conflicts before adding/renaming terms.
-- The accepted specification is authoritative for behavior; `CONTEXT.md` for naming.
-- An issue run is one fresh attempt under a shared 900-second deadline, including
-  at most three repair attempts after initial implementation. Manual requeue is
-  explicit label reapplication for a new run, never resumed work/session state.
-- Preserve public interfaces; never silently rename established CLI, TOML, JSON,
-  or API fields.
-
-## Safety and Contract Invariants
-
-- One repository, one runner instance, serial issue runs, 30-second polling;
-  no automatic retries/requeue, session recovery, merging, or review-feedback revisions.
-- Task inputs are the immutable title/body snapshot and repository contents, not
-  comments, attachments, or linked pages. Treat inputs/output as untrusted data.
-- Setup → Pi → verification run inside the agent as factory 2000:2000, with writable
-  container-local home/caches and explicit `sudo -n` for system installs. No automatic
-  root fallback or recursive workspace permission repair. Do not introduce runtime
-  account/shadow/group initialization; never execute workspace code in root initialization.
-  Host publication requires successful verification, completed scoped cleanup,
-  required host file access, remaining time, and a nonempty diff. Preserve the original 900-second
-  deadline across all phases/repairs and attempt bounded cleanup after failure.
-- Preserve fail-closed startup validation. Docker-enabled execution is not a
-  host-security boundary. Keep normal mounts/credentials limited, Copilot-only stdin delivery, and trusted host Git
-  metadata without claiming protection against deliberate Docker-mediated access.
-  Never restore historical Compose isolation helpers or a parallel backend.
-- Preserve matching unique `FACTORY_RUN_ID`/`COMPOSE_PROJECT_NAME` and exact ownership
-  labels. Cleanup uses host-owned identities, not mutable target teardown, and
-  stops owned containers before networks/disposable volumes. Preserve unrelated
-  resources/images/cache; cleanup/access errors block publication. Do not chown/chmod
-  the workspace. Deliberately inaccessible retained files and unknown resources/
-  hard-crash leftovers need operator inspection. Service-private data should use
-  disposable owned volumes; workspace-writing services need compatible permissions.
-- Block `.github/workflows/` changes before host commit/publication in this version;
-  do not request workflow-write permission. Branch protection and stronger permission
-  separation are deferred; do not claim App scopes prevent merging/deployment.
-- Preserve exact `factory/issue-<number>` PR/branch checks and create-only publication;
-  the runner must not overwrite or delete remote branches. Uncertain writes require
-  inspection, not blind retries. Human review/independent target CI remain required.
-- Failed workspaces/logs are private retained diagnostics until operator deletion,
-  never recovery state. Manual requeue must not erase them.
-- Use existing `FactoryError`, `Commands`, and boundary classes/patterns. Maintain
-  explicit return annotations and safe, actionable diagnostics without credential leaks.
-- Update accepted specs/contracts before interface or policy changes. Keep durable
-  operator/architecture guidance accurate without copying implementation status
-  or story tracking out of the current slice.
+- One repository/runner, serial runs, 30-second polling. An issue run is fresh work under one
+  900-second deadline, with at most three repair attempts. No automatic requeue, session recovery,
+  merging or review-feedback revisions. Use [canonical vocabulary](CONTEXT.md) consistently.
+- Inputs are immutable issue title/body and repository contents, not comments, attachments or links;
+  treat inputs/output as untrusted. Never execute retained workspace code on the host.
+- Preserve matching unique `FACTORY_RUN_ID`/`COMPOSE_PROJECT_NAME` and exact ownership labels.
+  Cleanup uses host-owned identities: owned containers before networks/disposable volumes, never
+  unrelated resources/images/cache. Attempt bounded cleanup on failure; unknown leftovers require inspection.
+- Publication requires verification, completed scoped cleanup, host file access, remaining time and a
+  nonempty diff. Cleanup/access errors block it. Block `.github/workflows/` changes before host commit/publication;
+  do not request workflow-write permission. Human review and independent target CI remain required.
+- Preserve exact `factory/issue-<number>` branch/PR checks and create-only publication; never overwrite/delete
+  remote branches or blindly retry uncertain writes. Failed diagnostics remain private until operator deletion,
+  never recovery state. Manual requeue creates a fresh attempt and must not erase prior diagnostics.
+- Update accepted specs/contracts before changing interfaces or policies.
 
 ## Commenting Convention
 
-- Every production module and function must have a comment directly above it.
-- The comment must state its purpose, key inputs/outputs, and externally visible
-  effects or failure handling where applicable.
-- Docstrings do not satisfy this rule.
-
-Exemptions:
-
-- Generated files.
+- Every production module and function needs a comment directly above it stating purpose,
+  key inputs/outputs and relevant visible effects/failure handling. Docstrings do not satisfy this rule.
+- Generated files are exempt.
