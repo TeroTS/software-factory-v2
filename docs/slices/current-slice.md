@@ -3,46 +3,44 @@
 Status: done
 
 ## Slice Goal
-- Generate a reviewable local ticket plan without GitHub writes.
+- Publish a reviewed ticket plan safely without queuing issues.
 
 ## Slice Boundary
-- US-01: The operator uses repo-local planning skills to turn a spec into one validated JSON artifact, with one proposed issue per story and explicit dependencies.
+- US-02: The operator previews and explicitly publishes a committed plan; GitHub holds a create-only backlog with known story-to-issue mappings.
 
 ## Stories In Scope
-- US-01 Generate a reviewable ticket plan.
+- US-02 Publish approved issues safely.
 
 ## Stories Completed In This Slice
-- US-01 Generate a reviewable ticket plan.
+- US-02 Publish approved issues safely.
 
 ## Stories Remaining In This Slice
 - None.
 
 ## Contract Inputs
-- `docs/contracts.md` Contracts 1 and 2 (local validation only).
+- `docs/contracts.md` Contracts 1–4.
 
 ## Decision Inputs
 - None.
 
 ## Shared State Required Now
-- Stable spec/story IDs, source provenance, narrative fields and dependency graph in the local plan.
+- Validated plan, committed source provenance, stable story identities and existing GitHub issues.
 
 ## Operations / Endpoints / Surfaces In This Slice
-- Repo-local planning skills, spec template and `python -m software_factory.planning validate --plan PLAN`.
+- `python -m software_factory.planning publish --plan PLAN [--dry-run]`.
 
 ## Tests Required
-- `./scripts/verify`: 577 passed, 73 opt-in Docker skips, 99.18% coverage, CDK and shell checks passed. Coverage decreased from 99.28% because the new CLI's `__main__` is exercised in a subprocess, outside coverage collection.
-- Local Markdown links and `git diff --check` passed. CDK warned about Node 25 and expired AWS credentials.
-- Manual skill exercise by the current agent: `artifacts/us01-planning-check.5LX50H/` contains a two-story spec and validated draft plan with correct identities/dependency; no GitHub calls were made. A second spec was flagged for missing dependencies, vague scope and missing verification; no plan was created for it. `uv run --frozen pytest tests/test_planning.py -q`: 35 passed.
-- A separate automated agent-generation test was declined; the skill-generation exercise above was manual. `./scripts/verify` was not rerun at the user's request.
+- `./scripts/verify`: 600 passed, 73 opt-in Docker skips, 95.77% coverage, CDK synthesis and shell checks passed. Coverage decreased from 99.18% because new publication boundary failure branches are not all exercised; new module coverage is 83%. CDK warned about Node 25 and expired AWS credentials.
+- Scripted-boundary and subprocess tests cover preview, provenance, conflicts, repeat publication, partial writes and interruption; no live GitHub calls were made.
 
 ## Not Now
-- US-02 publication, US-03 runner eligibility and US-04 activation.
+- US-03 runner eligibility and US-04 activation; live GitHub writes.
 
 ## Done When
-- Operator can generate and validate the authoritative plan locally; malformed plans fail without writes, and the focused generation exercise passes.
+- Preview is exact and read-only; explicit publication safely reports confirmed mappings or actionable failures without queuing or blind retries.
 
 ## Completion Summary
-- Repo-local planning skills and spec template produce a reviewable local plan; the validator rejects malformed plans and dependency graphs without GitHub writes.
+- Preview and explicitly publish committed plans with create-only GitHub reconciliation; publication does not queue work.
 
 ## Next Slice Recommendation
-- US-02 Publish approved issues safely; keep US-03 eligibility and US-04 activation deferred.
+- US-03 Enforce execution eligibility; keep US-04 activation deferred.

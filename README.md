@@ -50,7 +50,10 @@ Inspect [health](docs/operations.md#operational-health) and retained diagnostics
 Use the repo-local `.agents/skills/` in order: `grill-me`, `decision-to-spec`, then
 `spec-to-tickets`. The last skill creates a local plan for review, without GitHub writes.
 Validate it with `uv run --frozen python -m software_factory.planning validate --plan PLAN`.
-Publication and backlog activation require separate explicit operator requests.
+For a committed spec, review `uv run --frozen python -m software_factory.planning publish --plan PLAN --dry-run`,
+then explicitly publish with the same command without `--dry-run`. Publication uses the operator's
+GitHub.com `gh` identity, creates no trigger labels, and requires one publisher per repository.
+If a write is uncertain, inspect GitHub before another attempt; absence from a lookup is not proof of failure.
 
 ## Reference
 

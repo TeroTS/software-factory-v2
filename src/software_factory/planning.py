@@ -102,11 +102,19 @@ def main() -> int:
     commands = parser.add_subparsers(dest="command", required=True)
     validate = commands.add_parser("validate")
     validate.add_argument("--plan", type=Path, required=True)
+    publication = commands.add_parser("publish")
+    publication.add_argument("--plan", type=Path, required=True)
+    publication.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
     try:
         text = args.plan.read_text(encoding="utf-8")
         data = json.loads(text, object_pairs_hook=_object, parse_constant=_constant)
         validate_plan(data)
+        if args.command == "publish":
+            from software_factory.planning_publish import publish
+
+            publish(data, args.dry_run)
+            return 0
     except OSError, UnicodeError, ValueError, RecursionError:
         print("Cannot read plan: provide a readable, valid UTF-8 JSON file without duplicate keys", file=sys.stderr)
         return 1
