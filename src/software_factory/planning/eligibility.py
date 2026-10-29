@@ -17,6 +17,7 @@ def eligible(github: GitHub, issue: dict) -> bool:
     for candidate in issues:
         if "pull_request" in candidate:
             continue
+        state = candidate.get("state")
         if candidate.get("number") == issue["number"]:
             candidate = issue
         try:
@@ -30,7 +31,9 @@ def eligible(github: GitHub, issue: dict) -> bool:
                 if isinstance(raw, dict) and raw.get("spec_id") == current["spec_id"]:
                     identity = raw.get("story_id")
                     if isinstance(identity, str):
-                        by_story.setdefault(identity, []).append(None)
+                        if state not in ("open", "closed"):
+                            raise FactoryError("Invalid generated issue state; inspect repository issues")
+                        by_story.setdefault(identity, []).append((state, None))
             except ValueError, RecursionError:
                 pass
             continue
@@ -39,7 +42,13 @@ def eligible(github: GitHub, issue: dict) -> bool:
         number = candidate.get("number")
         if type(number) is not int or number <= 0:
             raise FactoryError("Invalid generated issue number; inspect repository issues")
-        by_story.setdefault(data["story_id"], []).append((number, data))
+        if state not in ("open", "closed"):
+            raise FactoryError("Invalid generated issue state; inspect repository issues")
+        by_story.setdefault(data["story_id"], []).append((state, (number, data)))
+    by_story = {
+        identity: [item for state, item in entries if state == "open"] or [item for _, item in entries]
+        for identity, entries in by_story.items()
+    }
     if current["story_id"] not in by_story:
         raise FactoryError("Generated issue not found during dependency lookup; inspect repository issues")
     visited, active = set(), set()

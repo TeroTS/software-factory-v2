@@ -157,10 +157,10 @@ def issue_number(issue: object, repository: str) -> int:
     return number
 
 
-# Exhaustively inspect open and closed issues, rejecting ambiguous or malformed generated candidates.
+# Inspect open issues, rejecting ambiguous or malformed generated candidates.
 def existing(gh: GitHub, plan: dict) -> dict[str, dict]:
     result = {}
-    issues = gh.items(gh.api("issues?state=all&per_page=100", pages=True), pages=True)
+    issues = gh.items(gh.api("issues?state=open&per_page=100", pages=True), pages=True)
     for issue in issues:
         if "pull_request" in issue:
             continue

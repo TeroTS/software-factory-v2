@@ -58,6 +58,7 @@ GitHub.com `gh` identity, creates no trigger labels, and requires one publisher 
 Once runner eligibility enforcement is deployed, explicitly queue the whole published backlog with
 `uv run --frozen python -m software_factory.planning activate --plan PLAN`. This includes blocked tickets;
 inspect all work before activation and run only one runner. Repeating activation can requeue failed runs.
+Publication and activation consider open tickets; see the [identity contract](docs/planning-contract.md).
 If a write is uncertain, inspect GitHub before another attempt; absence from a lookup is not proof of failure.
 
 ## Reference

@@ -296,5 +296,20 @@ with scripted GitHub/Pi boundaries; [CI](../.github/workflows/verify.yml) runs w
 
 ## Verification beyond unit tests
 
-Live GitHub/Copilot checks require **explicit approval**. AWS host acceptance must inspect cloud-init,
-retained mounts, factory Docker access and stopped execution; scripted checks do not prove first boot.
+Live tests require **explicit approval**. Stop the runner and inspect the test repository first;
+activation queues issues and could otherwise start issue runs. Supply a dedicated committed test spec
+in `TeroTS/factory-smoke-test` and a matching local ticket plan with a fresh `e2e-` spec ID for
+**each run**. Use one publisher and inspect uncertain writes rather than retrying blindly.
+
+```sh
+FACTORY_LIVE_PLANNING_TESTS=1 FACTORY_LIVE_TEST_PLAN=/absolute/path/to/plan.json \
+  uv run --frozen pytest -s tests/test_planning_publish.py -k live
+# Requires AWS credentials for account 172318459814 and a local native ARM64 Docker engine:
+FACTORY_LIVE_IMAGE_TESTS=1 uv run --frozen pytest -s tests/test_publish_image.py
+```
+
+Tests leave generated issues, trigger labels and uniquely tagged images for operator inspection;
+remove or close only confirmed test resources manually before restarting the runner. ECR storage
+can incur charges. Failed or interrupted tests can leave partial results; inspect before retrying.
+AWS host acceptance must inspect cloud-init, retained mounts, factory Docker access and stopped
+execution; scripted checks do not prove first boot.

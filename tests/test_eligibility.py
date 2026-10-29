@@ -25,6 +25,7 @@ def ticket(number, story, dependencies=()):
     title, body = render(plan, item)
     return {
         "number": number,
+        "state": "open",
         "title": title,
         "body": body,
         "labels": [{"name": "factory:generated"}, {"name": "agent:implement"}],
@@ -117,6 +118,64 @@ def test_poll_skips_blocked_then_claims_independent_and_later_uses_checked_edit(
     assert state["claims"] == [3, 2, 3]
     assert state["executed"][1]["title"] == "Operator edited title"
     assert state["executed"][1]["body"] == blocked["body"]
+
+
+def test_open_tickets_take_precedence_over_closed_duplicates():
+    current = ticket(2, "US-02", ["US-01"])
+    old_current = {**ticket(4, "US-02", ["US-01"]), "state": "closed"}
+    old_parent = {**ticket(5, "US-01"), "state": "closed"}
+    parent = ticket(1, "US-01")
+    gh = Mock(repository="owner/repo")
+    gh.api.return_value = [[old_current, old_parent, parent, current]]
+    gh.items.side_effect = lambda value, **kwargs: value[0]
+    gh.default_branch.return_value = "main"
+    gh.closing_prs.return_value = [
+        {"merged": True, "baseRefName": "main", "baseRepository": {"nameWithOwner": "owner/repo"}}
+    ]
+    snapshot = {key: value for key, value in current.items() if key != "state"}
+    assert eligible(gh, snapshot)
+    gh.closing_prs.assert_called_once_with(1)
+
+
+def test_closed_prerequisite_remains_eligible_evidence():
+    current = ticket(2, "US-02", ["US-01"])
+    parent = {**ticket(1, "US-01"), "state": "closed"}
+    gh = Mock(repository="owner/repo")
+    gh.api.return_value = [[current, parent]]
+    gh.items.side_effect = lambda value, **kwargs: value[0]
+    gh.default_branch.return_value = "main"
+    gh.closing_prs.return_value = [
+        {"merged": True, "baseRefName": "main", "baseRepository": {"nameWithOwner": "owner/repo"}}
+    ]
+    assert eligible(gh, current)
+    gh.closing_prs.assert_called_once_with(1)
+
+
+@pytest.mark.parametrize("state", [None, "unknown", []])
+def test_invalid_issue_state_blocks_eligibility(state):
+    current = ticket(2, "US-02", ["US-01"])
+    parent = {**ticket(1, "US-01"), "state": state}
+    gh = Mock(repository="owner/repo")
+    gh.api.return_value = [[current, parent]]
+    gh.items.side_effect = lambda value, **kwargs: value[0]
+    with pytest.raises(FactoryError, match="state"):
+        eligible(gh, current)
+
+
+def test_malformed_closed_duplicate_does_not_override_valid_open_ticket():
+    current = ticket(2, "US-02", ["US-01"])
+    parent = ticket(1, "US-01")
+    broken = {**ticket(3, "US-01"), "state": "closed"}
+    broken["body"] = broken["body"].replace('"version": 1', '"version": 2')
+    gh = Mock(repository="owner/repo")
+    gh.api.return_value = [[current, broken, parent]]
+    gh.items.side_effect = lambda value, **kwargs: value[0]
+    gh.default_branch.return_value = "main"
+    gh.closing_prs.return_value = [
+        {"merged": True, "baseRefName": "main", "baseRepository": {"nameWithOwner": "owner/repo"}}
+    ]
+    assert eligible(gh, current)
+    gh.closing_prs.assert_called_once_with(1)
 
 
 @pytest.mark.parametrize("damage", ["missing", "duplicate", "cycle", "bad-metadata", "invalid-duplicate", "lookup"])
