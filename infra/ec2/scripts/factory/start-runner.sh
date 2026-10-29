@@ -17,10 +17,12 @@ printf 'Private startup/progress log: %s/runner.log\n' "$work" >&2
 exec >> "$work/runner.log" 2>&1
 trap 'echo "Factory start/exit failed; inspect this private log and retained run diagnostics" >&2' ERR
 
+runner_id=
 for image in "${RUNNER_IMAGE:?missing selected runner}" "${AGENT_IMAGE:?missing selected agent}"; do
-  [[ "$image" =~ ^172318459814[.]dkr[.]ecr[.]eu-central-1[.]amazonaws[.]com/software-factory-(runner|agent)@sha256:[a-f0-9]{64}$ ]]
-  platform=$(docker --host unix:///var/run/docker.sock image inspect --format '{{.Os}}/{{.Architecture}}' "$image")
-  test "$platform" = linux/arm64
+  [[ "$image" != -* && "$image" != *://* && ! "$image" =~ [[:space:][:cntrl:]] ]]
+  inspected=$(docker --host unix:///var/run/docker.sock image inspect --format '{{.Os}}/{{.Architecture}} {{.Id}}' "$image")
+  [[ "$inspected" =~ ^linux/arm64\ (sha256:[a-f0-9]{64})$ ]]
+  if [[ -z "$runner_id" ]]; then runner_id=${BASH_REMATCH[1]}; fi
 done
 containers=$(docker --host unix:///var/run/docker.sock ps --quiet --filter 'name=^/(software-factory|factory-.*)$')
 test -z "$containers"
@@ -39,7 +41,7 @@ docker --host unix:///var/run/docker.sock run --rm --name software-factory --cid
   --mount type=bind,src=/home/factory/artifacts,dst=/home/factory/artifacts \
   --mount "type=bind,src=$state,dst=/home/factory/.config/software-factory,readonly" \
   --mount "type=bind,src=$HOME/.pi/agent,dst=/home/factory/.pi/agent" \
-  "$RUNNER_IMAGE" --config /home/factory/.config/software-factory/factory.toml 2>&1 |
+  "$runner_id" --config /home/factory/.config/software-factory/factory.toml 2>&1 |
   while IFS= read -r record; do
     printf '%s\n' "$record"
     if [[ "$record" == *'"event": "runner_polling"'* ]]; then systemd-notify --ready; fi

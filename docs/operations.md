@@ -3,7 +3,7 @@
 ## Operator setup
 
 Deploy only on **AWS EC2, Ubuntu 24.04 ARM64, factory 2000:2000**, with local native Docker.
-Complete [host setup](#ec2-host-setup), [image selection](#ec2-image-publication),
+Complete [host setup](#ec2-host-setup), [image configuration](#ec2-image-publication),
 [authentication](#authentication) and [target preparation](#shared-image-and-target-preparation),
 then create the [three-field TOML](../README.md#run-the-factory) outside the target checkout.
 Use Session Manager for administration and `sudo -iu factory` for factory commands; runner tools
@@ -82,8 +82,11 @@ commit; OCI revision identifies the base commit, not uncommitted changes. Tags a
 there are no automatic updates, image deletion or rollback/retention guarantees.
 
 On EC2, check `sudo /usr/local/sbin/factory-host-check`. Keep service, containers and native runners
-stopped throughout pull/selection; never start as an installation test. As factory, set `RUNNER_IMAGE`
-and `AGENT_IMAGE` to the chosen ECR digest references and pull using the instance role:
+stopped while pulling and configuring images; never start as an installation test. As factory,
+set `RUNNER_IMAGE` and `AGENT_IMAGE` to the published ECR references, for example
+`172318459814.dkr.ecr.eu-central-1.amazonaws.com/software-factory-runner:runner-v1` and
+`172318459814.dkr.ecr.eu-central-1.amazonaws.com/software-factory-agent:agent-v2`.
+Digest references remain supported. Pull using the instance role:
 
 ```bash
 (
@@ -95,63 +98,38 @@ and `AGENT_IMAGE` to the chosen ECR digest references and pull using the instanc
   aws ecr get-login-password --region eu-central-1 |
     docker --host unix:///var/run/docker.sock login --username AWS --password-stdin \
       172318459814.dkr.ecr.eu-central-1.amazonaws.com
-  docker --host unix:///var/run/docker.sock pull --platform linux/arm64 "${RUNNER_IMAGE:?set a runner digest reference}"
-  docker --host unix:///var/run/docker.sock pull --platform linux/arm64 "${AGENT_IMAGE:?set an agent digest reference}"
+  docker --host unix:///var/run/docker.sock pull --platform linux/arm64 "${RUNNER_IMAGE:?}"
+  docker --host unix:///var/run/docker.sock pull --platform linux/arm64 "${AGENT_IMAGE:?}"
 )
 ```
 
 Never copy operator AWS credentials to EC2 or mount ECR login state into runner/agent containers.
 
-### Stopped-host selection
+### Stopped-host configuration
 
-As factory, validate both images before atomically recording `deployment.env`; failures preserve
-prior selection/configuration. Do not start concurrently. Afterwards, explicitly set TOML `agent_image`
-to the recorded `AGENT_IMAGE`; runner selection stays outside TOML.
+As factory, record the references directly in `deployment.env` while stopped. Set TOML `agent_image`
+to the same `AGENT_IMAGE`; runner configuration stays outside TOML. Startup checks local availability
+and platform; there is no separate selection smoke test.
 
 ```bash
 (
   set -euo pipefail; umask 077
-  test "$(id -u):$(id -g)" = 2000:2000
-  unset DOCKER_CONTEXT; export DOCKER_HOST=unix:///var/run/docker.sock
-  # Reject active factory work or inspection errors; never stop or repair anything.
-  stopped() {
-    service=$(systemctl show software-factory.service --property=ActiveState --value)
-    case "$service" in inactive|failed) ;; *) return 1;; esac
-    containers=$(docker ps --quiet --filter 'name=^/(software-factory|factory-.*)$'); test -z "$containers"
-    if pgrep -u 2000 -f '[p]ython.*-m software_factory' >/dev/null; then return 1; else test "$?" = 1; fi
-  }
-  stopped
   state="$HOME/.config/software-factory"
   test ! -L "$state"; mkdir -p "$state"
-  work=$(mktemp -d "$state/.selection.XXXXXX")
-  trap 'test ! -s "$work/cid" || timeout 60s docker rm --force --volumes "$(<"$work/cid")"; rm -rf -- "$work"' EXIT
-  trap 'exit 1' HUP INT TERM
-  check='test "$(id -u):$(id -g)" = 2000:2000; test "$(uname -m)" = aarch64; python -m software_factory --help >/dev/null; gh --version; pi --version; docker compose version'
-  for image in "${RUNNER_IMAGE:?}" "${AGENT_IMAGE:?}"; do
-    [[ "$image" =~ ^172318459814[.]dkr[.]ecr[.]eu-central-1[.]amazonaws[.]com/software-factory-(runner|agent)@sha256:[a-f0-9]{64}$ ]]
-    platform=$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "$image"); test "$platform" = linux/arm64
-    timeout 60s docker run --detach --name "factory-selection-${work##*/}" --cidfile "$work/cid" --pull=never --platform linux/arm64 --network none --entrypoint sleep "$image" infinity
-    cid=$(<"$work/cid")
-    timeout 60s docker exec "$cid" sh -ec "$check"
-    if [ "$image" = "$RUNNER_IMAGE" ]; then
-      check=$(timeout 60s docker exec "$cid" python -c 'from software_factory.runner import RUNTIME_CHECK; print(RUNTIME_CHECK)')
-    fi
-    timeout 60s docker rm --force --volumes "$cid"
-    rm -- "$work/cid"
-  done
-  stopped
   test ! -L "$state/deployment.env"; test ! -d "$state/deployment.env"
-  printf 'RUNNER_IMAGE=%s\nAGENT_IMAGE=%s\n' "$RUNNER_IMAGE" "$AGENT_IMAGE" > "$work/deployment.env"
-  mv -f -- "$work/deployment.env" "$state/deployment.env"
+  work=$(mktemp "$state/.deployment.XXXXXX")
+  trap 'rm -f -- "$work"' EXIT
+  printf 'RUNNER_IMAGE=%s\nAGENT_IMAGE=%s\n' "${RUNNER_IMAGE:?}" "${AGENT_IMAGE:?}" > "$work"
+  mv -f -- "$work" "$state/deployment.env"
 )
 ```
 
 ## Explicit start
 
-After selection/authentication, keep TOML factory-owned, mode **0600**, at
-`/home/factory/.config/software-factory/factory.toml`; its agent reference must match selection.
+After image configuration/authentication, keep TOML factory-owned, mode **0600**, at
+`/home/factory/.config/software-factory/factory.toml`; its agent reference must match `AGENT_IMAGE`.
 The launcher binds same-path `/home/factory/artifacts`, read-only App/config state, writable Pi
-state and the local socket with its supplementary GID. It never pulls images or changes selection.
+state and the local socket with its supplementary GID. It never pulls images or changes configuration.
 **Inspect all eligible `agent:implement` issues and [recovery state](#manual-inspection-and-recovery)
 before authorizing execution.** Run only one runner per repository. From the administrative SSM shell:
 
@@ -160,7 +138,7 @@ sudo systemctl start software-factory.service
 ```
 
 Confirm [validated startup](#operational-health), not just service liveness. Startup has a five-minute
-limit. The service is static with `Restart=no`: preparation, image selection, reboot and crashes
+limit. The service is static with `Restart=no`: preparation, image configuration, reboot and crashes
 never authorize a start. Inspect container-name conflicts rather than removing them implicitly.
 
 ## Operational health
@@ -172,8 +150,9 @@ sudo systemctl show software-factory.service --property=ActiveState,SubState,Res
 sudo journalctl -u software-factory.service --no-pager -n 30
 ```
 
-As factory (`sudo -iu factory`), compare the actual runner with `RUNNER_IMAGE`;
-`AGENT_IMAGE` is selection, not evidence of a running agent. An absent runner is expected when stopped.
+As factory (`sudo -iu factory`), compare the actual runner image ID with the local ID resolved from
+`RUNNER_IMAGE` using `docker image inspect`; a mutable tag may have changed since startup.
+`AGENT_IMAGE` is configuration, not evidence of a running agent. An absent runner is expected when stopped.
 
 ```bash
 set -euo pipefail

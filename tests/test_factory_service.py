@@ -10,13 +10,16 @@ ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / "infra/ec2/scripts/factory"
 RUNNER = "172318459814.dkr.ecr.eu-central-1.amazonaws.com/software-factory-runner@sha256:" + "a" * 64
 AGENT = "172318459814.dkr.ecr.eu-central-1.amazonaws.com/software-factory-agent@sha256:" + "b" * 64
+RUNNER_ID = "sha256:" + "c" * 64
 
 
-def launch(tmp_path: Path, failure: str = "") -> tuple[subprocess.CompletedProcess, list, Path]:
+def launch(
+    tmp_path: Path, failure: str = "", runner: str = RUNNER, agent: str = AGENT
+) -> tuple[subprocess.CompletedProcess, list, Path]:
     home = tmp_path / "home"
     state = home / ".config/software-factory"
     state.mkdir(parents=True, mode=0o700)
-    (state / "deployment.env").write_text(f"RUNNER_IMAGE={RUNNER}\nAGENT_IMAGE={AGENT}\n")
+    (state / "deployment.env").write_text(f"RUNNER_IMAGE={runner}\nAGENT_IMAGE={agent}\n")
     (state / "factory.toml").write_text("private configuration fixture")
     pi = home / ".pi/agent"
     pi.mkdir(parents=True, mode=0o700)
@@ -48,7 +51,11 @@ if 'ps' in args:
     if failure == 'inspection': sys.exit(1)
     if failure == 'active': print('existing-runner')
 elif 'inspect' in args:
-    print('linux/amd64' if failure == 'platform' else 'linux/arm64')
+    if failure == 'missing-runner' and args[-1] == os.environ['RUNNER_IMAGE']: sys.exit(1)
+    if failure == 'missing-agent' and args[-1] == os.environ['AGENT_IMAGE']: sys.exit(1)
+    platform = 'linux/amd64' if failure == 'platform' else 'linux/arm64'
+    image_id = 'bad-id' if failure == 'image-id' else 'sha256:' + 'c' * 64
+    print(platform + (' ' + image_id if '{{.Id}}' in args[args.index('--format') + 1] else ''))
 else:
     failed = failure in {'startup', 'config'}
     print(json.dumps({'event': 'runner_failed' if failed else 'runner_polling'}), file=sys.stderr)
@@ -67,8 +74,8 @@ else:
             "RUNTIME_DIRECTORY": str(runtime),
             "NOTIFY_SOCKET": "fixture-notify-socket",
             "NOTIFIED": str(tmp_path / "notified"),
-            "RUNNER_IMAGE": RUNNER,
-            "AGENT_IMAGE": AGENT,
+            "RUNNER_IMAGE": runner,
+            "AGENT_IMAGE": agent,
         },
         text=True,
         capture_output=True,
@@ -77,18 +84,26 @@ else:
     return result, [json.loads(line) for line in calls.read_text().splitlines()] if calls.exists() else [], home
 
 
-def test_explicit_start_uses_selected_images_and_private_mounts(tmp_path: Path) -> None:
-    result, calls, home = launch(tmp_path)
+@pytest.mark.parametrize(
+    "runner,agent",
+    [
+        (RUNNER, AGENT),
+        ("software-factory-runner:runner-v1", "software-factory-agent:agent-v2"),
+        (RUNNER.split("@")[0] + ":runner-v1", AGENT.split("@")[0] + ":agent-v2"),
+    ],
+)
+def test_explicit_start_uses_selected_images_and_private_mounts(tmp_path: Path, runner: str, agent: str) -> None:
+    result, calls, home = launch(tmp_path, runner=runner, agent=agent)
     assert result.returncode == 0, result.stderr
     args = calls[-1]
     assert args[:3] == ["--host", "unix:///var/run/docker.sock", "run"]
     assert args[args.index("--user") + 1] == "2000:2000"
     assert args[args.index("--group-add") + 1] == "998"
     assert args[args.index("--pull=never") + 1 :][:2] == ["--platform", "linux/arm64"]
-    assert args[-3:] == [RUNNER, "--config", "/home/factory/.config/software-factory/factory.toml"]
+    assert args[-3:] == [RUNNER_ID, "--config", "/home/factory/.config/software-factory/factory.toml"]
     mounts = [args[i + 1] for i, value in enumerate(args) if value == "--mount"]
     assert "type=bind,src=/home/factory/artifacts,dst=/home/factory/artifacts" in mounts
-    assert args[args.index("--env") + 1] == f"AGENT_IMAGE={AGENT}"
+    assert args[args.index("--env") + 1] == f"AGENT_IMAGE={agent}"
     assert len([call for call in calls if "run" in call]) == 1
     assert "--entrypoint" not in args
     assert (
@@ -108,7 +123,21 @@ def test_explicit_start_uses_selected_images_and_private_mounts(tmp_path: Path) 
     assert (home / ".config/software-factory/factory.toml").read_text() == "private configuration fixture"
 
 
-@pytest.mark.parametrize("failure", ["active", "native", "inspection", "platform", "config", "startup", "notify"])
+@pytest.mark.parametrize(
+    "failure",
+    [
+        "active",
+        "native",
+        "inspection",
+        "platform",
+        "image-id",
+        "missing-runner",
+        "missing-agent",
+        "config",
+        "startup",
+        "notify",
+    ],
+)
 def test_start_failure_is_not_retried_and_preserves_state(tmp_path: Path, failure: str) -> None:
     result, calls, home = launch(tmp_path, failure)
     assert result.returncode != 0
@@ -120,6 +149,20 @@ def test_start_failure_is_not_retried_and_preserves_state(tmp_path: Path, failur
     )
     assert "private configuration fixture" not in result.stdout + result.stderr
     assert not (tmp_path / "notified").exists()
+
+
+@pytest.mark.parametrize("failure", ["missing-runner", "missing-agent"])
+def test_missing_tagged_image_blocks_start(tmp_path: Path, failure: str) -> None:
+    result, calls, _ = launch(tmp_path, failure, runner="runner:v1", agent="agent:v2")
+    assert result.returncode != 0
+    assert all("run" not in call for call in calls)
+
+
+@pytest.mark.parametrize("image", ["--unsafe", "https://registry/image:tag", "bad image:tag"])
+def test_start_rejects_unsafe_image_arguments(tmp_path: Path, image: str) -> None:
+    result, calls, _ = launch(tmp_path, runner=image)
+    assert result.returncode != 0
+    assert not calls
 
 
 def test_service_is_manual_only_and_allows_bounded_cleanup() -> None:

@@ -55,7 +55,7 @@ holds durable coordination. No database or HTTP API exists. One container execut
 - Preserve same-path workspace binds, socket supplementary GID, read-only App state,
   writable Pi refresh state and private retained logs. API and HTTPS Git use the same scoped
   App identity with renewal, never personal login or inherited-token fallback.
-- Runner/agent versions are independent. Build/publish explicitly; pull/select while stopped,
+- Runner/agent versions are independent. Build/publish explicitly; pull/configure while stopped,
   then start explicitly. No runtime pulls/builds, automatic updates/restarts, compatibility repair or rollback guarantee.
   Pin resolved image IDs; factory containers use `--platform linux/arm64 --pull=never`.
 - Bake host helpers/tooling into a tested AMI; UserData only supplies boot inputs and mounts

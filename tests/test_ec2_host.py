@@ -258,8 +258,8 @@ docker() {
         tmp_path,
         FAILURE=failure,
         DOCKER_CONFIG=str(prior),
-        RUNNER_IMAGE="registry/runner@sha256:" + "a" * 64,
-        AGENT_IMAGE="registry/agent@sha256:" + "b" * 64,
+        RUNNER_IMAGE="registry/runner:runner-v1",
+        AGENT_IMAGE="registry/agent:agent-v2",
     )
     assert (result.returncode == 0) is (not failure), result.stderr
     assert not list(tmp_path.glob("login.*"))
