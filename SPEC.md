@@ -1,98 +1,128 @@
 # Product Specification
 
-Source: [DECISIONS.md](DECISIONS.md)
+Source: [DECISIONS.md](DECISIONS.md). Canonical names: [CONTEXT.md](CONTEXT.md).
+Spec ID: `spec-to-tickets`
 
 ## Summary
-- Add repository-managed EC2 deployment with independently published runner and agent containers; this covers packaging and deployment, not a replacement execution backend.
+- Turn a target repository's spec into reviewed GitHub issues, explicitly queue the published backlog, and execute only tickets whose prerequisites are merged.
 
 ## Goals
-- Support deployment only on AWS EC2: bake Ubuntu 24.04 ARM64 host prerequisites into a private AMI; CloudFormation UserData mounts retained storage before Docker starts. Deploy the runner only as a container.
-- Supervise operator-started execution with systemd; expose status and private diagnostics.
-- Publish independently versioned native ARM64 runner and agent images from the operator computer to ECR; explicitly select their immutable identities on a stopped EC2 host.
-- Implement and deploy incrementally to AWS using profile `AWSAdministratorAccess-172318459814` in account `172318459814`, region `eu-central-1`; verify the authenticated account before creating resources. Run basic checks first, then obtain real AWS acceptance evidence for each deployed slice.
+- Provide operator-invoked planning, safe create-only publication, runner eligibility enforcement, and explicit whole-backlog activation.
+- Preserve handwritten-issue behavior, serial execution, and existing execution/publication safety gates.
+- Define the JSON plan, issue metadata/template, and command contracts before implementation.
 
 ## Non-Goals
-- Automatic credential enrollment or live GitHub/Copilot issue execution; AWS infrastructure deployment, EC2 host preparation, and live AWS acceptance are approved.
-- Parallel workers, automatic scheduling, application deployment, CI publication, or automatic updates.
-- Lima/local-host deployment, a separate host provisioner, native-runner deployment, or installing runner language/agent toolchains on the host. Developer test tooling and operator-local image publication are separate.
-- V1 rollback guarantees, guaranteed old-image retention, or new compatibility negotiation.
-- Graceful draining, automatic restart after crashes/reboots, automatic requeue, or restoration of interrupted runs.
-- Backups or cross-Availability-Zone portability of retained EBS storage.
+- Unattended planning, queuing without explicit approval, cross-repository publication, automatic issue updates, parallel execution, or distributed locking.
+- Deployment redesign, shared agent image changes, automatic merges, or changes to the existing runner entrypoint/configuration.
 
 ## User Stories
 
-### US-01: Prepare a stopped EC2 factory host
+### US-01: Generate a reviewable ticket plan
 Primary actor: Operator
-Trigger: An approved request to provision the factory host.
-Happy-path action: Deploy the repository's CloudFormation and host-preparation artifacts.
-Visible outcome: One prepared host is available through Session Manager, with factory execution stopped.
-Authoritative state transition: Undeployed infrastructure becomes a deployed stack with a prepared host and retained data volume.
-Slice boundary: Infrastructure, storage attachment, host preparation, basic automated checks, and live AWS verification of Session Manager access, the retained volume, provisioning, and stopped factory execution. Stack creation alone does not demonstrate completion.
-Acceptance criteria:
-- Define `eu-central-1`, one `t4g.xlarge`, Ubuntu 24.04 ARM64, local native Docker, and factory UID/GID 2000:2000. A separate disposable CDK builder stack, recreated with a fresh instance/root disk for each bake, bakes Docker/containerd, AWS CLI from its official ARM64 HTTPS installer (without detached-signature verification), SSM, factory identity and host helpers/service files into a private AMI. Capture through operator AWS CLI, not a custom resource; the AMI/backing snapshot survive builder-stack destruction. The operational stack selects an explicitly verified account-owned AMI; UserData only mounts the exact retained volume before enabling Docker and checking readiness. Never bake credentials, deployment selection, container images or retained data; keep Docker/containerd inactive during baking and blocked before retained mounts, including on reboot. Provide read-only host readiness inspection without a separate provisioner. Runner Python/Node/Pi/Git/gh belong in images, not host setup. Do not uninstall existing tools or alter retained data.
-- Keep a persistent shared-network CDK stack owning one dedicated VPC, public subnet, internet gateway and routes for builder and factory. Both consumer stacks depend on shared networking, not on each other; each owns its security group and IAM role. Preserve networking across bakes; provide outbound internet/public IPv4, no inbound access, and Session Manager rather than SSH.
-- Provide a separate encrypted 100 GiB gp3 EBS volume retained on instance deletion/replacement and a disposable root disk; persist credentials, configuration, deployment state, Docker data, and diagnostics on retained storage.
-- Preparation must not enroll credentials or start execution; failures remain visible and do not report a ready host. Existing data must not be silently erased or reformatted.
-Deferred follow-ups:
-- US-02 publishes and selects independently versioned runner and agent images.
 
-### US-02: Publish and select container images
-Primary actor: Operator
-Trigger: Runner and/or agent versions are approved for initial installation or update.
-Happy-path action: Publish each requested native image locally to ECR and explicitly select the independently chosen images while factory execution is stopped.
-Visible outcome: An identifiable runner/agent deployment is selected for the next explicit start.
-Authoritative state transition: The selected deployment changes from absent or the prior selection to the successfully validated requested image pair.
-Slice boundary: Local build/test/publication, ECR infrastructure and scoped host pull access, stopped-host pull/validation/selection, automated failure checks, and live publication/deployment verification. Publication is preparation for this one deployment outcome, not a second execution flow.
-Acceptance criteria:
-- Publish runner OR agent with an explicit independent version; record source commit and immutable image identities. Agent instructions/skills belong to the agent image; the bridge belongs to the runner. Do not require matching commits/tags or add compatibility negotiation.
-- Use separate Python AWS CDK builder and operational stacks consuming a persistent shared-network stack; neither consumer depends on the other. Embed repository host files during baking; operational UserData supplies only deployment-specific boot inputs. Rebuild/test the AMI for baked host/helper updates; container releases remain independent. Keep local build/push commands and systemd-managed Docker execution; no Compose deployment, runtime source fetch, or build/push custom resources.
-- Keep private credentials, three-field operator TOML (`repository`, `model`, `agent_image`), and diagnostics on retained storage outside images. Select the runner outside TOML; preserve independently configured `agent_image`.
-- Validate native images before atomically changing selection. Preparation never starts execution; refuse active service/container state. Failed preparation preserves prior selection, configuration, and diagnostics. Do not delete images or prior artifacts implicitly.
-- Preserve fail-closed startup, factory 2000:2000, local Docker socket access, same-path workspaces, read-only App credentials, writable Pi refresh state, and private retained diagnostics. Containerization is packaging, not host isolation.
-Deferred follow-ups:
-- US-03 explicitly starts the selected deployment; US-04 inspects health; US-05 stops execution.
+Depends on: None.
 
-### US-03: Explicitly start the selected deployment
-Primary actor: Operator
-Trigger: The operator authorizes execution after checking eligible issues and recovery state.
-Happy-path action: Start the selected runner container through systemd using its selected agent image.
-Visible outcome: The selected factory runs under systemd as factory 2000:2000 and reports startup success or a safe failure.
-Authoritative state transition: The systemd service changes from stopped to running only after an explicit start and successful existing startup validation.
-Slice boundary: Service invocation, existing startup validation, private log collection, and automated start-path checks; verify startup on EC2 after manual enrollment and explicit execution authorization.
-Acceptance criteria:
-- Use operator-supplied configuration and manually enrolled GitHub App/Copilot credentials; use exactly `repository`, `model`, `agent_image` in TOML and fixed retained `/home/factory/artifacts` with same-path binds; reject removed `artifacts_dir` with migration guidance without moving/deleting prior diagnostics. Preserve fail-closed startup validation, local engine/image requirements, and existing execution behavior.
-- Preserve one runner per target repository. Host preparation, image publication/selection, crashes, and reboots must not automatically start or restart the runner.
-- Failed startup remains observable without credential disclosure or fallback identities; a process being active alone does not establish successful startup.
-Deferred follow-ups:
-- US-04 inspects operational health; US-05 stops execution.
+Trigger: The operator requests a ticket plan from the target repository's SPEC.md.
 
-### US-04: Inspect operational health
-Primary actor: Operator
-Trigger: The operator needs to determine whether the deployed factory is functioning or needs intervention.
-Happy-path action: Follow the documented health-inspection procedure.
-Visible outcome: The operator can distinguish stopped, failed-startup, and running states and locate available progress and failure evidence.
-Authoritative state transition: None; inspection reads systemd state and existing factory logs without changing execution or GitHub state.
-Slice boundary: Operator health procedure, automated checks of its read-only boundaries, and real service/log inspection on EC2.
-Acceptance criteria:
-- Show how to inspect the service, selected runner/agent image identities, startup/polling/run events, and private diagnostic locations using existing logging behavior.
-- Explain that service liveness does not prove live GitHub/Copilot access, successful inference, cleanup, or publication; no inference or issue execution is triggered as a health probe.
-- Missing evidence and access errors require inspection rather than an assumed healthy result; do not expose credentials or raw transcripts.
-Deferred follow-ups:
-- US-05 stops the service when intervention or an upgrade is needed.
+Happy-path action: Generate one local JSON ticket plan through the repo-local planning skills.
 
-### US-05: Stop execution for maintenance
-Primary actor: Operator
-Trigger: The operator requests maintenance, an update or emergency shutdown.
-Happy-path action: Stop the systemd service using the existing interruption path.
-Visible outcome: The runner stops, with interruption/cleanup evidence and retained diagnostics available for inspection when relevant.
-Authoritative state transition: The service changes from running to stopped; interrupted work is not automatically requeued or resumed.
-Slice boundary: Systemd stop behavior, existing signal/cleanup handling, recovery guidance, automated checks, and real stop verification on EC2 without initiating target issues.
+Visible outcome: The operator can review proposed issues and their dependencies without creating anything on GitHub.
+
+Authoritative state transition: No ticket plan → locally generated ticket plan ready for review.
+
+Slice boundary: Operator planning through a validated JSON artifact, including repo-local skills, spec-template changes, and valid/invalid generation tests.
+
 Acceptance criteria:
-- Recommend stopping while idle but explicitly state that idle inspection is not race-free draining; stopping during a run interrupts it.
-- Allow the existing bounded cleanup and failure reporting rather than bypassing them; retain failed diagnostics and require inspection of uncertain publication or leftover resources before manual requeue.
-- Stop/cleanup failures remain visible and require intervention; service exit alone is not proof that all Docker resources were removed. Do not introduce graceful-drain state or broad resource deletion.
+- `.agents/skills/` supplies grill-me → decision-to-spec → spec-to-tickets as operator tools, outside the shared agent image.
+- The spec template includes a stable Spec ID, stable US-xx story IDs, and explicit Depends on fields; each story maps to exactly one proposed issue identified by `<spec-id>/<US-xx>`.
+- The ticket plan records source repository, spec path/revision, scope, acceptance criteria, verification, and dependencies; publication requires a full committed source SHA under US-02.
+- Reject unknown dependency IDs, self-dependencies, and cycles. Flag oversized or ambiguous stories for spec revision; never silently split them or invent dependencies/policy.
+- The JSON artifact is authoritative for review and approval; planning skills do not publish issues or queue work.
+- A focused test demonstrates spec-to-plan generation, stable identity, dependency validation, and absence of GitHub writes; relevant malformed-input cases are covered.
+
 Deferred follow-ups:
-- US-02 publishes and selects an update; an older available image may be explicitly selected without a retention or rollback guarantee.
+- US-02 publishes the reviewed ticket plan.
+
+### US-02: Publish approved issues safely
+Primary actor: Operator
+
+Depends on: US-01.
+
+Trigger: The operator explicitly requests publication of a reviewed ticket plan.
+
+Happy-path action: Publish the approved plan as a create-only GitHub backlog, reconciling existing or uncertain results by stable story identity.
+
+Visible outcome: The operator can identify the published issue for each story without duplicate creation or automatic queuing.
+
+Authoritative state transition: Reviewed ticket plan → published backlog with known story-to-issue mappings.
+
+Slice boundary: Dry-run preview and explicit approval through GitHub issue creation/reconciliation, with scripted-boundary success, conflict, and partial-write tests.
+
+Acceptance criteria:
+- Dry-run renders the exact proposed issue content from a fixed template without writes. The operator reviews it, then explicitly publishes the current plan.
+- Before writes, validate the operator's authenticated gh identity, the source's full committed SHA, and that SPEC.md belongs to the same GitHub repository receiving the issues.
+- Issues include stable identity, source repository/path/SHA, scope, acceptance criteria, verification, and dependencies, plus a dedicated generated-ticket label and embedded planning metadata.
+- Skip matching existing issues. If only the source commit changes and the story is otherwise identical, retain the existing issue and original provenance; changed scope, criteria, verification, or dependencies is a conflict for operator review.
+- Never overwrite existing issues. Reconcile interrupted/uncertain issue creation by stable identity; never blindly retry uncertain writes. Conflicting or unresolved outcomes require operator inspection.
+- Publication never applies agent:implement. Exactly one publisher operates per repository; no distributed publication lock is required.
+- A focused test demonstrates explicit publication after dry-run review; failure tests cover invalid plans/provenance, duplicate prevention, conflicts, and partial-publication reconciliation without blind retries.
+
+Deferred follow-ups:
+- US-03 enforces generated-ticket eligibility before US-04 exposes backlog activation.
+
+### US-03: Enforce execution eligibility
+Primary actor: Local runner
+
+Depends on: US-02.
+
+Trigger: A poll discovers an issue labeled agent:implement.
+
+Happy-path action: Validate a generated ticket and its prerequisites before claiming it for serial execution.
+
+Visible outcome: Eligible work can start while blocked tickets wait without preventing independent work.
+
+Authoritative state transition: Eligible labeled issue → claimed issue run; blocked or invalid tickets do not enter an issue run.
+
+Slice boundary: GitHub discovery and eligibility checks through the existing claim boundary, including edited-issue, blocked-work, API-failure, and handwritten-issue tests.
+
+Acceptance criteria:
+- Process labeled issues serially in ascending GitHub issue number. Skip valid blocked tickets silently, retain their trigger labels, and reconsider them on later polls without blocking independent eligible work.
+- Either the dedicated generated-ticket label or embedded metadata identifies a generated ticket. Missing/invalid required metadata blocks execution and produces an actionable error, including for manually labeled tickets.
+- A prerequisite is complete only when a PR explicitly closing its issue is merged into the target repository's default branch; issue closure, an open/draft PR, or passing CI alone is insufficient.
+- Check prerequisites before claiming. Failed GitHub dependency lookups produce actionable errors and prevent the affected ticket's execution; they are not evidence of completion.
+- Permit deliberate operator edits: use the current title/body snapshot and validate current metadata/dependencies. Edited issues need not match the originally approved plan.
+- Preserve handwritten-issue behavior and runtime App-only API/Git authentication. Repository editors remain trusted: removing both generated identifiers makes a ticket indistinguishable from a handwritten issue.
+- Preserve existing claim, execution, cleanup, and publication safety gates. No routine blocked-ticket comments, notifications, or INFO events are added.
+- A focused test shows a lower-numbered blocked ticket being skipped while independent eligible work is claimed; tests also cover later eligibility after merge, malformed metadata, manual labeling, lookup failures, operator edits, and handwritten issues.
+
+Deferred follow-ups:
+- US-04 lets the operator explicitly queue the published backlog once this enforcement exists.
+
+### US-04: Queue the published backlog
+Primary actor: Operator
+
+Depends on: US-03.
+
+Trigger: The operator explicitly requests activation of the published backlog.
+
+Happy-path action: Apply agent:implement to the published backlog, including tickets with unmet prerequisites.
+
+Visible outcome: The backlog is queued without per-story selection; the terminal reports queuing results, and the runner determines execution eligibility.
+
+Authoritative state transition: Published, unqueued backlog → labeled backlog authorized for serial execution.
+
+Slice boundary: Explicit operator activation through GitHub label writes and terminal results, with blocked-ticket and label-write failure tests.
+
+Acceptance criteria:
+- Require an explicit operator request separate from publication; use the operator's authenticated gh identity, checked before writes.
+- Queue the whole published backlog, not only currently eligible stories. Unmet prerequisites do not reject activation or require per-story selection.
+- Report queuing results in the terminal. GitHub label-write failures must not be presented as confirmed success.
+- Require US-03 enforcement before exposing this workflow: blocked tickets retain their labels and become eligible after prerequisite merges without another activation.
+- Preserve the single-runner requirement, serial execution, and existing manual-requeue policy; backlog activation introduces no automatic retry after a claimed run fails or is interrupted.
+- A focused test activates a backlog containing independent and blocked tickets, confirms the reported label results, and demonstrates that runner enforcement still prevents premature execution; cover relevant authorization and label-write failures.
+
+Deferred follow-ups:
+- None.
 
 ## Open Questions
-- None for the accepted incremental AWS deployment scope. Deployment commands and exact filesystem layout remain implementation work; additional policy or dependency decisions require approval.
+- None at the product-policy level. Exact JSON schema, issue metadata/template, dependency representation, command interfaces, and reconciliation contracts must be defined before implementation.

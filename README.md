@@ -45,6 +45,13 @@ can execute immediately. Run one runner per repository; no automatic restart, re
 Inspect [health](docs/operations.md#operational-health) and retained diagnostics before intervening.
 **Docker access grants effective engine/host control, not isolation.**
 
+## Plan a target backlog
+
+Use the repo-local `.agents/skills/` in order: `grill-me`, `decision-to-spec`, then
+`spec-to-tickets`. The last skill creates a local plan for review, without GitHub writes.
+Validate it with `uv run --frozen python -m software_factory.planning validate --plan PLAN`.
+Publication and backlog activation require separate explicit operator requests.
+
 ## Reference
 
 - [Operator guide](docs/operations.md): deployment, authentication, health and recovery.

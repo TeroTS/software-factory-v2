@@ -1,9 +1,7 @@
 # Domain Vocabulary
 
-Execution terms reflect the accepted direction in [DECISIONS.md](DECISIONS.md).
-AWS EC2 deployment packages the existing local runner and shared agent image independently;
-it does not introduce another execution backend. Behavior and interface requirements
-remain in [SPEC.md](SPEC.md).
+Canonical names cover issue execution and the planning workflow accepted in [DECISIONS.md](DECISIONS.md).
+Accepted decisions and specifications define behavior and interfaces; this file defines naming.
 
 ## Canonical Terms
 
@@ -62,3 +60,35 @@ The person who evaluates the draft PR, requirement fulfillment, tests, and CI re
 ### Manual requeue
 
 The operator's explicit reapplication of `agent:implement` after failure or interruption. It requests a fresh issue run, not resumption of the previous agent session; remote branch cleanup may be required first.
+
+### User story
+
+One independently demonstrable outcome in SPEC.md, identified by a stable `US-xx` within a stable spec ID. Each story maps to exactly one generated ticket.
+
+### Ticket plan
+
+The authoritative local JSON artifact mapping a committed spec revision to proposed issues and dependencies. The operator reviews dry-run output and explicitly requests publication of the current plan.
+
+### Generated ticket
+
+A GitHub issue published from a ticket plan for one user story, identified by `<spec-id>/<US-xx>`. It carries a dedicated label and planning metadata; it is not a separate work item from the issue.
+
+### Planning metadata
+
+The machine-readable section of a generated ticket recording story identity, source-spec provenance, and dependencies. The local runner validates it before claiming work; its exact format belongs in the contracts.
+
+### Prerequisite
+
+A story that must have a PR explicitly closing its issue merged into the target repository's default branch before a dependent ticket can execute. Closing the issue alone is insufficient.
+
+### Published backlog
+
+The generated tickets published from a ticket plan. Publication creates issues without queuing them; activation explicitly authorizes the backlog for execution.
+
+### Activation
+
+The operator's explicit action applying `agent:implement` to the published backlog, including blocked tickets. It queues work rather than starting it immediately; the local runner still checks prerequisites.
+
+### Partial-publication reconciliation
+
+Checking GitHub against stable story identities after interrupted or uncertain issue creation to establish what was published. Matching issues are reused; conflicts or unresolved outcomes require inspection rather than blind retries.
