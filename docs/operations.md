@@ -188,7 +188,7 @@ Set `LOG` to the journal's path for this invocation, not an older successful sta
 set -euo pipefail
 : "${LOG:?set the confirmed invocation runner.log path}"
 grep -E '"event": "(runner_polling|runner_failed|runner_interrupted)"' "$LOG"
-grep -E '"event": "(poll_started|poll_failed|run_started|phase_started|issue_succeeded|issue_failed|issue_interrupted|cleanup_failed|publication_completed|publication_observation_failed|diagnostics_retained|failure_reporting_failed)"' "$LOG" | tail -n 40
+grep -E '"event": "(poll_started|poll_failed|issue_eligibility_failed|run_started|phase_started|issue_succeeded|issue_failed|issue_interrupted|cleanup_failed|publication_completed|publication_observation_failed|diagnostics_retained|failure_reporting_failed)"' "$LOG" | tail -n 40
 ```
 
 | State/evidence | Interpretation |
@@ -197,6 +197,7 @@ grep -E '"event": "(poll_started|poll_failed|run_started|phase_started|issue_suc
 | `failed`, non-success result, `runner_failed` or launcher error | Inspect startup log; `activating` still awaits validation. |
 | `active/running` + this invocation's `runner_polling` | Startup validation passed, not proof of current provider access. |
 | `poll_started` / `poll_failed` | Poll attempt / error; no polling-success heartbeat. Polling pauses during issue runs. |
+| `issue_eligibility_failed` | Generated ticket or dependency lookup needs inspection; its trigger label remains. |
 | `run_started` / `phase_started` | Issue-run identity, private diagnostic location and progress. |
 
 Missing/stale evidence, no matches or access errors mean **inspect**, not healthy. Liveness proves

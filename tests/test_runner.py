@@ -22,7 +22,12 @@ def runtime(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     github.discover.return_value = [1]
     github.open_pr.return_value = None
     github.branch_exists.return_value = False
-    github.snapshot.return_value = {"number": 1, "title": "task", "body": None}
+    github.issue_for_eligibility.return_value = {
+        "number": 1,
+        "title": "task",
+        "body": None,
+        "labels": [{"name": "agent:implement"}],
+    }
     github.default_branch.return_value = "main"
     github.publish.return_value = "https://github.com/owner/repo/pull/3"
     repo = Mock()
@@ -65,11 +70,11 @@ def test_first_pass_claim_setup_verify_cleanup_publish_order(runtime) -> None:
     runner.poll_once()
     assert [call[0] for call in events.mock_calls] == [
         "github.discover",
+        "github.issue_for_eligibility",
         "github.open_pr",
         "github.branch_exists",
         "github.remove_trigger",
         "github.comment",
-        "github.snapshot",
         "github.default_branch",
         "repo.checkout",
         "sandbox.start",
@@ -139,7 +144,6 @@ def test_preclaim_failure_never_executes_or_guesses_label_state(runtime, phase, 
 @pytest.mark.parametrize(
     "component,method",
     [
-        ("github", "snapshot"),
         ("github", "default_branch"),
         ("repo", "checkout"),
         ("sandbox", "start"),

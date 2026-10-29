@@ -41,7 +41,9 @@ remove legacy `artifacts_dir`/Compose fields explicitly without moving prior dia
 Targets must supply executable, noninteractive `./scripts/setup` and `./scripts/verify` matching target CI.
 
 **Inspect eligible issues before [starting](docs/operations.md#explicit-start):** already-labeled issues
-can execute immediately. Run one runner per repository; no automatic restart, requeue or recovery.
+can execute immediately. Generated tickets wait until each prerequisite has a closing PR merged into
+the default branch; invalid metadata produces an eligibility error without claiming the issue.
+Run one runner per repository; no automatic restart, requeue or recovery.
 Inspect [health](docs/operations.md#operational-health) and retained diagnostics before intervening.
 **Docker access grants effective engine/host control, not isolation.**
 

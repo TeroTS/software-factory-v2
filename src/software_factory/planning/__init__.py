@@ -35,9 +35,8 @@ def _narrative(value: object) -> bool:
     return isinstance(value, str) and bool(value.strip()) and "<!-- software-factory:planning" not in value
 
 
-# Validate exact plan shape, provenance syntax, unique story identities and the dependency DAG.
-def validate_plan(value: object) -> None:
-    plan = _fields(value, {"version", "repository", "spec_id", "source", "stories"})
+# Validate shared version, repository, spec ID and source fields in a plan or issue metadata.
+def _validate_provenance(plan: dict) -> None:
     if type(plan["version"]) is not int or plan["version"] != 1:
         raise FactoryError("Invalid plan: unsupported version")
     repository = plan["repository"]
@@ -57,6 +56,27 @@ def validate_plan(value: object) -> None:
         not isinstance(commit, str) or not re.fullmatch(r"(?:[0-9a-f]{40}|[0-9a-f]{64})", commit)
     ):
         raise FactoryError("Invalid plan: source commit must be a full lowercase object ID or null")
+
+
+# Recognize positive story IDs consistently in plans and generated issue metadata.
+def _valid_story_id(identity: object) -> bool:
+    return (
+        isinstance(identity, str)
+        and bool(re.fullmatch(r"US-[0-9]{2,}", identity))
+        and any(c != "0" for c in identity[3:])
+    )
+
+
+# Require a list of distinct dependency IDs before graph or metadata validation.
+def _validate_dependencies(edges: object) -> None:
+    if not isinstance(edges, list) or not all(isinstance(edge, str) for edge in edges) or len(edges) != len(set(edges)):
+        raise FactoryError("Invalid plan: dependencies must be unique story IDs")
+
+
+# Validate exact plan shape, provenance syntax, unique story identities and the dependency DAG.
+def validate_plan(value: object) -> None:
+    plan = _fields(value, {"version", "repository", "spec_id", "source", "stories"})
+    _validate_provenance(plan)
     stories = plan["stories"]
     if not isinstance(stories, list) or not stories:
         raise FactoryError("Invalid plan: stories must be a nonempty array")
@@ -64,12 +84,7 @@ def validate_plan(value: object) -> None:
     for item in stories:
         story = _fields(item, {"id", "title", "scope", "acceptance_criteria", "verification", "depends_on"})
         identity = story["id"]
-        if (
-            not isinstance(identity, str)
-            or not re.fullmatch(r"US-[0-9]{2,}", identity)
-            or not any(c != "0" for c in identity[3:])
-            or identity in dependencies
-        ):
+        if not _valid_story_id(identity) or identity in dependencies:
             raise FactoryError("Invalid plan: story IDs must be unique positive US-xx IDs")
         if not _narrative(story["title"]) or not _narrative(story["scope"]):
             raise FactoryError("Invalid plan: title and scope must be nonempty narrative text")
@@ -78,12 +93,7 @@ def validate_plan(value: object) -> None:
             if not isinstance(entries, list) or not entries or not all(_narrative(entry) for entry in entries):
                 raise FactoryError("Invalid plan: criteria and verification must be nonempty narrative arrays")
         edges = story["depends_on"]
-        if (
-            not isinstance(edges, list)
-            or not all(isinstance(edge, str) for edge in edges)
-            or len(edges) != len(set(edges))
-        ):
-            raise FactoryError("Invalid plan: dependencies must be unique story IDs")
+        _validate_dependencies(edges)
         dependencies[identity] = set(edges)
     for identity, edges in dependencies.items():
         if identity in edges or not edges <= dependencies.keys():
@@ -105,15 +115,22 @@ def main() -> int:
     publication = commands.add_parser("publish")
     publication.add_argument("--plan", type=Path, required=True)
     publication.add_argument("--dry-run", action="store_true")
+    activation = commands.add_parser("activate")
+    activation.add_argument("--plan", type=Path, required=True)
     args = parser.parse_args()
     try:
         text = args.plan.read_text(encoding="utf-8")
         data = json.loads(text, object_pairs_hook=_object, parse_constant=_constant)
         validate_plan(data)
         if args.command == "publish":
-            from software_factory.planning_publish import publish
+            from software_factory.planning.publish import publish
 
             publish(data, args.dry_run)
+            return 0
+        if args.command == "activate":
+            from software_factory.planning.activate import activate
+
+            activate(data)
             return 0
     except OSError, UnicodeError, ValueError, RecursionError:
         print("Cannot read plan: provide a readable, valid UTF-8 JSON file without duplicate keys", file=sys.stderr)
@@ -126,7 +143,3 @@ def main() -> int:
         return 1
     print("Ticket plan is valid")
     return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

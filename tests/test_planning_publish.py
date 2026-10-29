@@ -66,6 +66,15 @@ elif endpoint.startswith("repos/Example/target/git/trees/"):
 elif endpoint.startswith("repos/Example/target/contents/"):
     response = {"type": "file", "encoding": "base64", "content": s["spec"]}
 elif endpoint.startswith("repos/Example/target/issues?"): response = [s["issues"]]
+elif endpoint.endswith("/labels") and "/issues/" in endpoint and method == "POST":
+    n = int(endpoint.split("/issues/")[1].split("/")[0])
+    issue = next(i for i in s["issues"] if i["number"] == n)
+    if not any(x["name"] == "agent:implement" for x in issue["labels"]):
+        issue["labels"].append({"name": "agent:implement"})
+    response = issue["labels"]
+    if s.get("activation_failure") == n:
+        p.write_text(json.dumps(s)); sys.exit(1)
+    if s.get("activation_invalid") == n: response = []
 elif endpoint.startswith("repos/Example/target/labels?"): response = [s["labels"]]
 elif endpoint == "repos/Example/target/labels" and method == "POST":
     s["labels"].append({"name": payload["name"]}); response = s["labels"][-1]
@@ -105,6 +114,87 @@ def invoke(path: Path, *args: str) -> subprocess.CompletedProcess:
 
 def state(path: Path) -> dict:
     return json.loads((path / "state.json").read_text())
+
+
+def test_activation_queues_entire_backlog_and_runner_still_blocks_dependencies(
+    boundary: tuple[Path, dict, dict],
+) -> None:
+    from unittest.mock import Mock
+
+    from software_factory.planning.eligibility import eligible
+
+    path, _, _ = boundary
+    assert invoke(path).returncode == 0
+    env = {**os.environ, "PATH": f"{path}{os.pathsep}{os.environ['PATH']}", "FAKE_STATE": str(path / "state.json")}
+    command = [sys.executable, "-m", "software_factory.planning", "activate", "--plan", str(path / "plan.json")]
+    result = subprocess.run(command, capture_output=True, text=True, env=env)
+    assert result.returncode == 0, result.stderr
+    assert "US-01: queued #1" in result.stdout and "US-02: queued #2" in result.stdout
+    issues = state(path)["issues"]
+    assert all(any(label["name"] == "agent:implement" for label in i["labels"]) for i in issues)
+    gh = Mock(repository="Example/target")
+    gh.api.return_value = [issues]
+    gh.items.side_effect = lambda value, **kwargs: value[0]
+    gh.default_branch.return_value = "main"
+    gh.closing_prs.return_value = []
+    assert eligible(gh, issues[0]) and not eligible(gh, issues[1])
+    gh.closing_prs.return_value = [
+        {"merged": True, "baseRefName": "main", "baseRepository": {"nameWithOwner": "Example/target"}}
+    ]
+    assert eligible(gh, issues[1])
+    again = subprocess.run(command, capture_output=True, text=True, env=env)
+    assert again.returncode == 0 and "already queued" in again.stdout
+
+
+@pytest.mark.parametrize("damage", ["login", "repository", "missing", "duplicate", "malformed", "draft"])
+def test_activation_preflight_blocks_writes(boundary: tuple[Path, dict, dict], damage: str) -> None:
+    path, plan, _ = boundary
+    assert invoke(path).returncode == 0
+    s = state(path)
+    if damage == "login":
+        s["login"] = ""
+    elif damage == "repository":
+        s["repository"] = "other/repo"
+    elif damage == "missing":
+        s["issues"].pop()
+    elif damage == "duplicate":
+        s["issues"].append({**s["issues"][0], "number": 9, "html_url": "https://github.com/Example/target/issues/9"})
+    elif damage == "malformed":
+        s["issues"][1]["body"] = "private invalid content"
+    else:
+        plan["source"]["commit"] = None
+        (path / "plan.json").write_text(json.dumps(plan))
+    before = len(s["calls"])
+    (path / "state.json").write_text(json.dumps(s))
+    env = {**os.environ, "PATH": f"{path}{os.pathsep}{os.environ['PATH']}", "FAKE_STATE": str(path / "state.json")}
+    result = subprocess.run(
+        [sys.executable, "-m", "software_factory.planning", "activate", "--plan", str(path / "plan.json")],
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+    assert result.returncode == 1
+    assert all(c[0] == "GET" for c in state(path)["calls"][before:])
+
+
+@pytest.mark.parametrize("failure", ["activation_failure", "activation_invalid"])
+def test_activation_stops_on_unconfirmed_label_write(boundary: tuple[Path, dict, dict], failure: str) -> None:
+    path, _, _ = boundary
+    assert invoke(path).returncode == 0
+    s = state(path)
+    s[failure] = 2
+    (path / "state.json").write_text(json.dumps(s))
+    env = {**os.environ, "PATH": f"{path}{os.pathsep}{os.environ['PATH']}", "FAKE_STATE": str(path / "state.json")}
+    result = subprocess.run(
+        [sys.executable, "-m", "software_factory.planning", "activate", "--plan", str(path / "plan.json")],
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+    assert result.returncode == 1
+    assert "US-01: queued #1" in result.stdout
+    assert "US-02" in result.stderr and "uncertain" in result.stderr
+    assert sum(c[0] == "POST" and "/issues/2/labels" in c[1] for c in state(path)["calls"]) == 1
 
 
 def test_preview_then_create_and_reconcile(boundary: tuple[Path, dict, dict]) -> None:

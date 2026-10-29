@@ -78,7 +78,7 @@ elif path == 'issues/1/comments' and method == 'POST':
     state['comments'].append(payload['body'])
     result = {}
 elif path == 'issues/1':
-    result = {'title':'implement fixture','body':None}
+    result = {'title':'implement fixture','body':None,'labels':[{'name':'agent:implement'}]}
 elif path == '':
     result = {'default_branch':'main','full_name':'owner/repo'}
 elif path == 'pulls' and method == 'POST':

@@ -7,7 +7,7 @@ import sys
 from urllib.parse import quote
 
 from software_factory.github import GitHub
-from software_factory.planning import _constant, _object, validate_plan
+from software_factory.planning import _constant, _object, _valid_story_id, _validate_dependencies, _validate_provenance
 from software_factory.process import Commands, FactoryError
 
 LABEL = "factory:generated"
@@ -125,30 +125,16 @@ def metadata(issue: dict, repository: str) -> dict | None:
             "depends_on",
         }:
             raise ValueError
+        _validate_provenance(data)
         deps = data["depends_on"]
-        if not isinstance(deps, list) or not all(isinstance(d, str) for d in deps):
-            raise ValueError
-
-        # Reuse plan validation for the metadata shape and each referenced story ID.
-        def dummy(identity: str, edges: list) -> dict:
-            return {
-                "id": identity,
-                "title": "x",
-                "scope": "x",
-                "acceptance_criteria": ["x"],
-                "verification": ["x"],
-                "depends_on": edges,
-            }
-
-        plan = {
-            "version": data["version"],
-            "repository": data["repository"],
-            "spec_id": data["spec_id"],
-            "source": data["source"],
-            "stories": [dummy(data["story_id"], deps)] + [dummy(d, []) for d in deps],
-        }
-        validate_plan(plan)
-        if data["source"]["commit"] is None or data["repository"].lower() != repository.lower():
+        _validate_dependencies(deps)
+        if (
+            not _valid_story_id(data["story_id"])
+            or not all(_valid_story_id(dependency) for dependency in deps)
+            or data["story_id"] in deps
+            or data["source"]["commit"] is None
+            or data["repository"].lower() != repository.lower()
+        ):
             raise ValueError
         return data
     except ValueError, TypeError, KeyError, RecursionError, FactoryError:
@@ -215,10 +201,9 @@ def ordered(plan: dict) -> list[dict]:
     return result
 
 
-# Authenticate the operator and validate remote provenance and all conflicts before creating anything.
-def publish(plan: dict, dry_run: bool) -> None:
-    commands = Commands()
-    gh = GitHub(plan["repository"], commands)
+# Authenticate the operator and confirm the explicit destination before any writes.
+def operator(gh: GitHub, plan: dict) -> tuple[str, str]:
+    commands = gh.commands
     try:
         user = json.loads(
             commands.run(["gh", "api", "--hostname", "github.com", "user", "--method", "GET"], "GitHub identity")
@@ -235,6 +220,13 @@ def publish(plan: dict, dry_run: bool) -> None:
         or repo["full_name"].lower() != plan["repository"].lower()
     ):
         raise FactoryError("Cannot confirm destination repository")
+    return login, repo["full_name"]
+
+
+# Validate remote provenance and all conflicts before creating any issues.
+def publish(plan: dict, dry_run: bool) -> None:
+    gh = GitHub(plan["repository"], Commands())
+    login, repository = operator(gh, plan)
     verify_source(gh, plan)
     stories = ordered(plan)
     for story in stories:
@@ -250,7 +242,7 @@ def publish(plan: dict, dry_run: bool) -> None:
             title, body = render(plan, story)
             print(f"Title: {title}\nLabels: {LABEL}\n{body}")
         return
-    print(f"Authenticated GitHub login: {login}; destination: {repo['full_name']}", flush=True)
+    print(f"Authenticated GitHub login: {login}; destination: {repository}", flush=True)
     found = existing(gh, plan)
     for story in stories:
         key = f"{plan['spec_id']}/{story['id']}"

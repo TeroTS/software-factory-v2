@@ -1,46 +1,42 @@
 # Current Slice
 
-Status: done
+Status: active
 
 ## Slice Goal
-- Publish a reviewed ticket plan safely without queuing issues.
+- Explicitly queue the entire published backlog for eligibility-controlled execution.
 
 ## Slice Boundary
-- US-02: The operator previews and explicitly publishes a committed plan; GitHub holds a create-only backlog with known story-to-issue mappings.
+- US-04: The operator activates a published backlog; confirmed issues receive the trigger label and terminal results.
 
 ## Stories In Scope
-- US-02 Publish approved issues safely.
+- US-04 Queue the published backlog.
 
 ## Stories Completed In This Slice
-- US-02 Publish approved issues safely.
 
 ## Stories Remaining In This Slice
-- None.
+- US-04 Queue the published backlog.
 
 ## Contract Inputs
-- `docs/contracts.md` Contracts 1–4.
+- `docs/contracts.md` Contracts 1–3, 5 and 6.
 
 ## Decision Inputs
 - None.
 
 ## Shared State Required Now
-- Validated plan, committed source provenance, stable story identities and existing GitHub issues.
+- Valid committed ticket plan, published issue identities and current metadata/labels.
 
 ## Operations / Endpoints / Surfaces In This Slice
-- `python -m software_factory.planning publish --plan PLAN [--dry-run]`.
+- Operator `python -m software_factory.planning activate --plan PLAN` and GitHub issue labels.
 
 ## Tests Required
-- `./scripts/verify`: 600 passed, 73 opt-in Docker skips, 95.77% coverage, CDK synthesis and shell checks passed. Coverage decreased from 99.18% because new publication boundary failure branches are not all exercised; new module coverage is 83%. CDK warned about Node 25 and expired AWS credentials.
-- Scripted-boundary and subprocess tests cover preview, provenance, conflicts, repeat publication, partial writes and interruption; no live GitHub calls were made.
+- Scripted CLI activation and runner eligibility, authorization, invalid identities and uncertain label writes; `./scripts/verify`.
 
 ## Not Now
-- US-03 runner eligibility and US-04 activation; live GitHub writes.
+- Live GitHub/Copilot calls, automatic requeue and per-story activation.
 
 ## Done When
-- Preview is exact and read-only; explicit publication safely reports confirmed mappings or actionable failures without queuing or blind retries.
+- All matched tickets, including blocked ones, are queued with confirmed results; failures stop safely.
 
 ## Completion Summary
-- Preview and explicitly publish committed plans with create-only GitHub reconciliation; publication does not queue work.
 
 ## Next Slice Recommendation
-- US-03 Enforce execution eligibility; keep US-04 activation deferred.

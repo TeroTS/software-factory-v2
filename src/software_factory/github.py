@@ -64,7 +64,7 @@ class GitHub:
             if type(number) is not int or number <= 0:
                 raise FactoryError("GitHub returned an invalid issue number")
             numbers.append(number)
-        return numbers
+        return sorted(numbers)
 
     # Match PR identity by both head repository and branch, never body text or a prefix.
     def open_pr(self, number: int) -> str | None:
@@ -98,6 +98,69 @@ class GitHub:
             raise FactoryError("GitHub returned invalid labels after trigger removal")
         if any(label["name"] == "agent:implement" for label in labels):
             raise FactoryError("GitHub label removal was not confirmed")
+
+    # Read and validate the current title, body and labels together before eligibility checks.
+    def issue_for_eligibility(self, number: int) -> dict:
+        issue = self.api(f"issues/{number}")
+        if (
+            not isinstance(issue, dict)
+            or not isinstance(issue.get("title"), str)
+            or "body" not in issue
+            or (issue["body"] is not None and not isinstance(issue["body"], str))
+            or not isinstance(issue.get("labels"), list)
+            or any(not isinstance(label, dict) or not isinstance(label.get("name"), str) for label in issue["labels"])
+        ):
+            raise FactoryError("GitHub returned invalid issue snapshot or labels")
+        return {"number": number, "title": issue["title"], "body": issue["body"], "labels": issue["labels"]}
+
+    # Fetch all GitHub-reported closing PRs, including closed PRs, using the scoped App identity.
+    def closing_prs(self, number: int) -> list[dict]:
+        owner, repo = self.repository.split("/")
+        query = """query($owner: String!, $repo: String!, $number: Int!, $cursor: String) {
+          repository(owner: $owner, name: $repo) { issue(number: $number) {
+            closedByPullRequestsReferences(first: 100, after: $cursor, includeClosedPrs: true) {
+              nodes { merged baseRefName baseRepository { nameWithOwner } }
+              pageInfo { hasNextPage endCursor }
+            }
+          } }
+        }"""
+        result, cursor, seen = [], None, set()
+        while True:
+            payload = {"query": query, "variables": {"owner": owner, "repo": repo, "number": number, "cursor": cursor}}
+            output = self.commands.run(
+                ["gh", "api", "--hostname", "github.com", "graphql", "--method", "POST", "--input", "-"],
+                "GitHub prerequisite lookup",
+                input=json.dumps(payload),
+                env=self.auth.environment(self.commands) if self.auth is not None else None,
+            )
+            try:
+                data = json.loads(output)
+                if not isinstance(data, dict) or data.get("errors"):
+                    raise ValueError
+                connection = data["data"]["repository"]["issue"]["closedByPullRequestsReferences"]
+                nodes, page = connection["nodes"], connection["pageInfo"]
+                if not isinstance(nodes, list) or type(page["hasNextPage"]) is not bool:
+                    raise ValueError
+                for pr in nodes:
+                    if (
+                        not isinstance(pr, dict)
+                        or type(pr.get("merged")) is not bool
+                        or not isinstance(pr.get("baseRefName"), str)
+                        or not isinstance(pr.get("baseRepository"), dict)
+                        or not isinstance(pr["baseRepository"].get("nameWithOwner"), str)
+                    ):
+                        raise ValueError
+                result.extend(nodes)
+                if not page["hasNextPage"]:
+                    return result
+                cursor = page["endCursor"]
+                if not isinstance(cursor, str) or not cursor or cursor in seen:
+                    raise ValueError
+                seen.add(cursor)
+            except ValueError, TypeError, KeyError:
+                raise FactoryError(
+                    "GitHub prerequisite lookup returned invalid data; inspect repository access"
+                ) from None
 
     # Capture only the current issue's title/body and identity; comments and linked content are never fetched.
     def snapshot(self, number: int) -> dict:

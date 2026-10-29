@@ -14,6 +14,7 @@ from pathlib import Path
 from software_factory.auth import GitHubApp
 from software_factory.config import Config
 from software_factory.github import GitHub
+from software_factory.planning.eligibility import eligible
 from software_factory.process import Commands, FactoryError
 from software_factory.repository import Repository
 from software_factory.sandbox import PI_FLAGS, Sandbox, copilot_endpoint
@@ -270,6 +271,20 @@ class Runner:
         claimed = False
         directory = None
         try:
+            issue = github.issue_for_eligibility(number)
+            if not any(label["name"] == "agent:implement" for label in issue["labels"]):
+                return
+            if not eligible(github, issue):
+                return
+        except FactoryError as error:
+            logger.error(
+                "Issue eligibility check failed: %s",
+                error,
+                extra={"event": "issue_eligibility_failed"},
+            )
+            return
+        snapshot = {key: issue[key] for key in ("number", "title", "body")}
+        try:
             existing = github.open_pr(number)
             branch_exists = False if existing else github.branch_exists(number)
             github.remove_trigger(number)
@@ -288,7 +303,7 @@ class Runner:
             directory = Path(tempfile.mkdtemp(prefix=f"issue-{number}-", dir=self.artifacts))
             commands.log = directory / "run.log"
             github.comment(number, "Running: implementation started")
-            url = self.execute(number, github, commands, directory)
+            url = self.execute(number, github, commands, directory, snapshot)
             github.comment(number, "Succeeded: " + url)
             logger.info("Issue #%s succeeded", number, extra={"event": "issue_succeeded", "pr_url": url})
         except FactoryError as error:
@@ -312,8 +327,7 @@ class Runner:
                 )
 
     # Run setup/Pi/verification under one deadline, stop mutators and clean resources, then publish through trusted Git.
-    def execute(self, number: int, github: GitHub, commands: Commands, directory: Path) -> str:
-        snapshot = github.snapshot(number)
+    def execute(self, number: int, github: GitHub, commands: Commands, directory: Path, snapshot: dict) -> str:
         branch = github.default_branch()
         repository = Repository(directory, commands, self.runtime.github_auth)
         url = f"https://github.com/{self.config.repository}.git"
