@@ -55,6 +55,9 @@ Validate it with `uv run --frozen python -m software_factory.planning validate -
 For a committed spec, review `uv run --frozen python -m software_factory.planning publish --plan PLAN --dry-run`,
 then explicitly publish with the same command without `--dry-run`. Publication uses the operator's
 GitHub.com `gh` identity, creates no trigger labels, and requires one publisher per repository.
+Once runner eligibility enforcement is deployed, explicitly queue the whole published backlog with
+`uv run --frozen python -m software_factory.planning activate --plan PLAN`. This includes blocked tickets;
+inspect all work before activation and run only one runner. Repeating activation can requeue failed runs.
 If a write is uncertain, inspect GitHub before another attempt; absence from a lookup is not proof of failure.
 
 ## Reference

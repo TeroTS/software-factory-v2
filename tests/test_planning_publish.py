@@ -75,6 +75,8 @@ elif endpoint.endswith("/labels") and "/issues/" in endpoint and method == "POST
     if s.get("activation_failure") == n:
         p.write_text(json.dumps(s)); sys.exit(1)
     if s.get("activation_invalid") == n: response = []
+    if s.get("activation_bad_label") == n: response = [{"name": None}]
+    if s.get("activation_dropped_labels") == n: response = [{"name": "agent:implement"}]
 elif endpoint.startswith("repos/Example/target/labels?"): response = [s["labels"]]
 elif endpoint == "repos/Example/target/labels" and method == "POST":
     s["labels"].append({"name": payload["name"]}); response = s["labels"][-1]
@@ -98,9 +100,9 @@ print(json.dumps(response))
     return tmp_path, plan, state
 
 
-def invoke(path: Path, *args: str) -> subprocess.CompletedProcess:
+def invoke(path: Path, *args: str, command: str = "publish") -> subprocess.CompletedProcess:
     env = {**os.environ, "PATH": f"{path}{os.pathsep}{os.environ['PATH']}", "FAKE_STATE": str(path / "state.json")}
-    argv = ["planning", "publish", "--plan", str(path / "plan.json"), *args]
+    argv = ["planning", command, "--plan", str(path / "plan.json"), *args]
     stdout, stderr = io.StringIO(), io.StringIO()
     with (
         patch.dict(os.environ, env),
@@ -117,11 +119,12 @@ def state(path: Path) -> dict:
 
 
 def test_activation_queues_entire_backlog_and_runner_still_blocks_dependencies(
-    boundary: tuple[Path, dict, dict],
+    boundary: tuple[Path, dict, dict], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from unittest.mock import Mock
 
-    from software_factory.planning.eligibility import eligible
+    from software_factory.config import Config
+    from software_factory.runner import AgentRuntime, Runner
 
     path, _, _ = boundary
     assert invoke(path).returncode == 0
@@ -132,21 +135,37 @@ def test_activation_queues_entire_backlog_and_runner_still_blocks_dependencies(
     assert "US-01: queued #1" in result.stdout and "US-02: queued #2" in result.stdout
     issues = state(path)["issues"]
     assert all(any(label["name"] == "agent:implement" for label in i["labels"]) for i in issues)
-    gh = Mock(repository="Example/target")
-    gh.api.return_value = [issues]
-    gh.items.side_effect = lambda value, **kwargs: value[0]
-    gh.default_branch.return_value = "main"
-    gh.closing_prs.return_value = []
-    assert eligible(gh, issues[0]) and not eligible(gh, issues[1])
+    again = subprocess.run(command, capture_output=True, text=True, env=env)
+    assert again.returncode == 0 and "already queued" in again.stdout
+    gh = GitHub("Example/target", Mock())
+    gh.api = lambda *args, **kwargs: [issues]
+    gh.default_branch = Mock(return_value="main")
+    gh.closing_prs = Mock(return_value=[])
+    gh.discover = lambda: [i["number"] for i in issues if any(x["name"] == "agent:implement" for x in i["labels"])]
+    gh.issue_for_eligibility = lambda number: next(i.copy() for i in issues if i["number"] == number)
+    gh.open_pr = Mock(return_value="https://github.com/Example/target/pull/9")
+    gh.comment = Mock()
+    claims = []
+
+    def claim(number: int) -> None:
+        claims.append(number)
+        issue = next(i for i in issues if i["number"] == number)
+        issue["labels"] = [label for label in issue["labels"] if label["name"] != "agent:implement"]
+
+    gh.remove_trigger = claim
+    monkeypatch.setattr("software_factory.runner.GitHub", lambda *args: gh)
+    runner = Runner(Config("Example/target", "model", "image", path), AgentRuntime("image", "unix:///socket"))
+    runner.poll_once()
+    assert claims == [1]
+    assert any(label["name"] == "agent:implement" for label in issues[1]["labels"])
     gh.closing_prs.return_value = [
         {"merged": True, "baseRefName": "main", "baseRepository": {"nameWithOwner": "Example/target"}}
     ]
-    assert eligible(gh, issues[1])
-    again = subprocess.run(command, capture_output=True, text=True, env=env)
-    assert again.returncode == 0 and "already queued" in again.stdout
+    runner.poll_once()
+    assert claims == [1, 2]
 
 
-@pytest.mark.parametrize("damage", ["login", "repository", "missing", "duplicate", "malformed", "draft"])
+@pytest.mark.parametrize("damage", ["login", "repository", "missing", "duplicate", "same-number", "malformed", "draft"])
 def test_activation_preflight_blocks_writes(boundary: tuple[Path, dict, dict], damage: str) -> None:
     path, plan, _ = boundary
     assert invoke(path).returncode == 0
@@ -159,6 +178,8 @@ def test_activation_preflight_blocks_writes(boundary: tuple[Path, dict, dict], d
         s["issues"].pop()
     elif damage == "duplicate":
         s["issues"].append({**s["issues"][0], "number": 9, "html_url": "https://github.com/Example/target/issues/9"})
+    elif damage == "same-number":
+        s["issues"][1].update(number=1, html_url="https://github.com/Example/target/issues/1")
     elif damage == "malformed":
         s["issues"][1]["body"] = "private invalid content"
     else:
@@ -166,35 +187,75 @@ def test_activation_preflight_blocks_writes(boundary: tuple[Path, dict, dict], d
         (path / "plan.json").write_text(json.dumps(plan))
     before = len(s["calls"])
     (path / "state.json").write_text(json.dumps(s))
-    env = {**os.environ, "PATH": f"{path}{os.pathsep}{os.environ['PATH']}", "FAKE_STATE": str(path / "state.json")}
-    result = subprocess.run(
-        [sys.executable, "-m", "software_factory.planning", "activate", "--plan", str(path / "plan.json")],
-        capture_output=True,
-        text=True,
-        env=env,
-    )
+    result = invoke(path, command="activate")
     assert result.returncode == 1
     assert all(c[0] == "GET" for c in state(path)["calls"][before:])
 
 
-@pytest.mark.parametrize("failure", ["activation_failure", "activation_invalid"])
+@pytest.mark.parametrize(
+    "failure", ["activation_failure", "activation_invalid", "activation_bad_label", "activation_dropped_labels"]
+)
 def test_activation_stops_on_unconfirmed_label_write(boundary: tuple[Path, dict, dict], failure: str) -> None:
     path, _, _ = boundary
     assert invoke(path).returncode == 0
     s = state(path)
     s[failure] = 2
     (path / "state.json").write_text(json.dumps(s))
-    env = {**os.environ, "PATH": f"{path}{os.pathsep}{os.environ['PATH']}", "FAKE_STATE": str(path / "state.json")}
-    result = subprocess.run(
-        [sys.executable, "-m", "software_factory.planning", "activate", "--plan", str(path / "plan.json")],
-        capture_output=True,
-        text=True,
-        env=env,
-    )
+    result = invoke(path, command="activate")
     assert result.returncode == 1
     assert "US-01: queued #1" in result.stdout
     assert "US-02" in result.stderr and "uncertain" in result.stderr
     assert sum(c[0] == "POST" and "/issues/2/labels" in c[1] for c in state(path)["calls"]) == 1
+
+
+def test_activation_uses_current_edits_and_orders_by_issue_number(boundary: tuple[Path, dict, dict]) -> None:
+    path, _, _ = boundary
+    assert invoke(path).returncode == 0
+    s = state(path)
+    first, second = s["issues"]
+    first.update(number=8, html_url="https://github.com/Example/target/issues/8")
+    second.update(number=3, html_url="https://github.com/Example/target/issues/3", title="Edited title")
+    second["body"] = second["body"].replace('"depends_on": ["US-01"]', '"depends_on": []') + "Edited task\n"
+    second["labels"].append({"name": "operator-label"})
+    (path / "state.json").write_text(json.dumps(s))
+    before = len(s["calls"])
+    result = invoke(path, command="activate")
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.index("US-02: queued #3") < result.stdout.index("US-01: queued #8")
+    writes = [call for call in state(path)["calls"][before:] if call[0] == "POST"]
+    assert [call[1] for call in writes] == [
+        "repos/Example/target/issues/3/labels",
+        "repos/Example/target/issues/8/labels",
+    ]
+    assert all(call[2] == {"labels": ["agent:implement"]} for call in writes)
+    assert {label["name"] for label in state(path)["issues"][1]["labels"]} == {
+        "factory:generated",
+        "operator-label",
+        "agent:implement",
+    }
+    before = len(state(path)["calls"])
+    again = invoke(path, command="activate")
+    assert again.returncode == 0 and again.stdout.count("already queued") == 2
+    assert all(call[0] == "GET" for call in state(path)["calls"][before:])
+
+
+def test_activation_interruption_reports_uncertain_write(
+    boundary: tuple[Path, dict, dict], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path, _, _ = boundary
+    assert invoke(path).returncode == 0
+    original = GitHub.api
+
+    def interrupted(self: GitHub, endpoint: str, **kwargs: object) -> object:
+        if endpoint == "issues/1/labels" and kwargs.get("method") == "POST":
+            raise KeyboardInterrupt
+        return original(self, endpoint, **kwargs)
+
+    monkeypatch.setattr(GitHub, "api", interrupted)
+    result = invoke(path, command="activate")
+    assert result.returncode == 130
+    assert "US-01" in result.stderr and "uncertain" in result.stderr
+    assert not any(c[0] == "POST" and "/issues/" in c[1] for c in state(path)["calls"])
 
 
 def test_preview_then_create_and_reconcile(boundary: tuple[Path, dict, dict]) -> None:

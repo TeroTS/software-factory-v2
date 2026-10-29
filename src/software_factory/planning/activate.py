@@ -21,15 +21,18 @@ def activate(plan: dict) -> None:
         if issue is None:
             raise FactoryError(f"Published ticket {key} not found; inspect repository issues")
         tickets.append((issue_number(issue, plan["repository"]), key, issue))
+    if len({number for number, _, _ in tickets}) != len(tickets):
+        raise FactoryError("Multiple planned stories map to one issue; inspect repository issues")
     for number, key, issue in sorted(tickets):
         if any(label["name"] == "agent:implement" for label in issue["labels"]):
             print(f"{key}: already queued #{number} {issue['html_url']}", flush=True)
             continue
         try:
             labels = gh.items(gh.api(f"issues/{number}/labels", method="POST", payload={"labels": ["agent:implement"]}))
-            if any(not isinstance(label.get("name"), str) for label in labels) or not any(
-                label["name"] == "agent:implement" for label in labels
-            ):
+            if any(not isinstance(label.get("name"), str) for label in labels):
+                raise FactoryError("Label write not confirmed")
+            names = {label["name"] for label in labels}
+            if "agent:implement" not in names or not {label["name"] for label in issue["labels"]} <= names:
                 raise FactoryError("Label write not confirmed")
         except (FactoryError, KeyboardInterrupt) as error:
             print(f"{key}: uncertain label write for #{number}; operator inspection required", file=sys.stderr)
