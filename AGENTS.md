@@ -12,6 +12,14 @@
   `docs/slices/current-slice.md`. Other docs contain durable guidance, not progress reports.
 - Keep docs short: link to the authoritative file instead of repeating its rules or procedures.
 
+## Domain Vocabulary
+
+- Read [CONTEXT.md](CONTEXT.md) before naming domain concepts.
+- Use its canonical terms consistently in code, tests, documentation and user-facing output.
+- Resolve terminology conflicts before adding or renaming terms.
+- Treat the accepted specification as authoritative for behavior and `CONTEXT.md` for naming.
+- Preserve public-interface compatibility; never silently rename established CLI, JSON or API fields.
+
 ## Code map
 
 The standard-library Python runner polls GitHub and executes serial issue runs; GitHub
